@@ -1,0 +1,18 @@
+# Never commit: the data folder holds every key and the settings password
+/data/
+*.env
+.env
+config.json
+config.seed.json
+config.seed.private.json
+
+# Local files
+.DS_Store
+__pycache__/
+*.pyc
+/venv/
+.claude/
+*.tar
+*.tar.gz
+*.img.gz
+*.sha256

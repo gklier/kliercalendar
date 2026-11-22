@@ -1,0 +1,32 @@
+# The dashboard server: run it on any machine in the house with Docker.
+#
+#   docker compose up -d --build
+#
+# Portainer: Stacks -> Add stack -> Repository, point it at this repository, compose path
+# "compose.yaml", and set DATA_DIR (and TZ) under Environment variables. "Pull and redeploy"
+# updates it later.
+#
+# Everything the server knows lives in DATA_DIR (settings, keys, photos, counters): that folder is
+# the whole backup. It must be owned by uid 1000, which is who the container runs as:
+#   sudo chown -R 1000:1000 "$DATA_DIR"
+services:
+  dashboard:
+    build: .
+    image: family-dashboard:latest
+    container_name: family-dashboard
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      # The server isn't on the TV's own computer, so don't trust requests for coming from this
+      # machine; the TV proves itself with the TV key (Settings -> Backup).
+      DASHBOARD_OFFSITE: "1"
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - ${DATA_DIR:-./data}:/data
+    mem_limit: 200m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/admin/api/session', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3

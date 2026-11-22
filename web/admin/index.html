@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Family Dashboard settings</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="preload" href="../fonts/Inter.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <div id="gate" class="gate" hidden></div>
+
+  <div id="app" class="app" hidden>
+    <header class="top">
+      <a class="brand" href="#tv"><img src="favicon.svg" alt="" width="28" height="28"><span>Family Dashboard</span></a>
+      <nav class="nav" id="nav" aria-label="Settings sections">
+        <a href="#tv">On the TV</a>
+        <a href="#calendars">Calendars</a>
+        <a href="#stocks">Stocks</a>
+        <a href="#look">Look</a>
+        <a href="#schedule">Schedule</a>
+        <a href="#layout" data-expert>Layout</a>
+        <a href="#drive" data-expert>Drive times</a>
+        <a href="#weather" data-expert>Weather</a>
+        <a href="#backup" data-expert>Backup</a>
+        <a href="#about" data-expert>How it works</a>
+        <a href="#account">Account</a>
+      </nav>
+      <label class="mode"><input type="checkbox" id="expert"><span>Expert settings<small>Keys, layout, backups and the technical details</small></span></label>
+    </header>
+    <main id="page" class="page" tabindex="-1"></main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="pages-schedule.js"></script>
+  <script src="pages-look.js"></script>
+  <script src="pages-layout.js"></script>
+  <script src="pages-ops.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

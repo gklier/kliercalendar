@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Family Dashboard</title>
+  <link rel="preload" href="fonts/Inter.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="booting">
+  <div class="photo" aria-hidden="true"></div>
+  <div class="photo" aria-hidden="true"></div>
+  <div class="sky" aria-hidden="true">
+    <div class="orb orb-b"></div>
+    <div class="orb orb-a"></div>
+    <div class="orb orb-c"></div>
+  </div>
+
+  <main class="stage" id="stage">
+    <section class="clock" aria-label="Date and time">
+      <div class="clock-time" id="clock-time"></div>
+      <div class="clock-date" id="clock-date"></div>
+    </section>
+
+    <section class="glass weather" id="weather" aria-label="Weather"></section>
+
+    <section class="glass drive" id="drive" aria-label="Drive times"></section>
+
+    <section class="glass calendar" aria-label="Next two weeks">
+      <div class="cal-top">
+        <h2>Next two weeks</h2>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+    </section>
+
+    <section class="glass focus" id="focus" aria-label="Day at a glance"></section>
+
+    <section class="ticker" id="ticker" aria-label="Stock prices"></section>
+  </main>
+
+  <div class="status" id="status" aria-live="polite"></div>
+  <div class="dim" aria-hidden="true"></div>
+
+  <script src="config.js"></script>
+  <script src="icons.js"></script>
+  <script src="demo.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+[Unit]
+Description=Family Dashboard server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__DIR__/server
+ExecStart=__DIR__/venv/bin/python __DIR__/server/server.py --config __DIR__/data/config.json --state-dir __DIR__/data/state
+Restart=always
+RestartSec=5
+MemoryMax=150M
+Nice=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=__DIR__/data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

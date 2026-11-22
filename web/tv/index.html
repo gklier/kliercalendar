@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Family Dashboard</title>
+  <style>
+    html, body { height: 100%; margin: 0; background: #0B1626; color: rgba(255, 255, 255, 0.72); font: 600 28px/1.4 -apple-system, "Inter", system-ui, sans-serif; }
+    body { display: grid; place-items: center; text-align: center; }
+    p { max-width: 32ch; }
+  </style>
+</head>
+<body>
+  <p id="msg">Connecting to the family dashboard…</p>
+  <script>
+    /* The TV launcher opens /tv#k=<TV key>&next=<page>. The part after # never
+       leaves the Pi's browser; it's traded here for a cookie, then the page opens. */
+    (function () {
+      var h = new URLSearchParams(location.hash.slice(1));
+      var key = h.get("k") || "";
+      var next = h.get("next") || "/?mode=live";
+      if (next.charAt(0) !== "/" || next.charAt(1) === "/") next = "/?mode=live";
+      history.replaceState(null, "", "/tv");
+      function go() {
+        fetch("/api/tv/pair", {
+          method: "POST", cache: "no-store", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", "X-Dashboard": "1" },
+          body: JSON.stringify({ key: key })
+        }).then(function (r) {
+          if (r.ok) return location.replace(next);
+          return r.json().catch(function () { return {}; }).then(function (j) {
+            document.getElementById("msg").textContent = (j.error || "The dashboard didn't accept this TV.") + " Trying again in a minute.";
+            setTimeout(go, 60000);
+          });
+        }, function () {
+          document.getElementById("msg").textContent = "Can't reach the dashboard server. Trying again in 30 seconds.";
+          setTimeout(go, 30000);
+        });
+      }
+      go();
+    })();
+  </script>
+</body>
+</html>

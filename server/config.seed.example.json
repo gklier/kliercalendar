@@ -1,0 +1,52 @@
+{
+  "timezone": "UTC",
+  "home": {
+    "label": "Home",
+    "address": "100 Example Street, Springfield, ST 00000"
+  },
+  "tempest": {
+    "station_id": "",
+    "token": "",
+    "station_name": "Backyard station"
+  },
+  "calendar": {
+    "calendars": [
+      {
+        "name": "Family",
+        "color": "#0A84FF"
+      },
+      {
+        "name": "Alex",
+        "color": "#30D158"
+      },
+      {
+        "name": "Sam",
+        "color": "#FF375F"
+      }
+    ]
+  },
+  "drive": {
+    "places": [
+      {
+        "name": "Office",
+        "icon": "work",
+        "address": "200 Office Park Road, Springfield"
+      },
+      {
+        "name": "Grandparents",
+        "icon": "heart",
+        "address": "12 Orchard Lane, Shelbyville"
+      },
+      {
+        "name": "Bank",
+        "icon": "pin",
+        "address": "1 Main Street, Springfield"
+      },
+      {
+        "name": "Airport",
+        "icon": "plane",
+        "address": "Springfield Regional Airport"
+      }
+    ]
+  }
+}

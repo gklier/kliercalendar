@@ -1,0 +1,9 @@
+.git
+.gitignore
+data
+venv
+docs
+tools
+*.md
+**/__pycache__
+**/test_*.py

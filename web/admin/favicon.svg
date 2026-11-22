@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Family Dashboard calendar">
+  <rect x="5" y="9" width="54" height="50" rx="11" fill="#FFFFFF"/>
+  <path d="M5 20C5 14.5 9.500 9 16 9h32c6.500 0 11 5.500 11 11v7H5z" fill="#FF453A"/>
+  <rect x="17" y="3" width="6" height="13" rx="3" fill="#2C2C2E"/>
+  <rect x="41" y="3" width="6" height="13" rx="3" fill="#2C2C2E"/>
+  <g fill="#C9CFDA">
+    <rect x="14" y="33" width="6" height="6" rx="1.500"/><rect x="24" y="33" width="6" height="6" rx="1.500"/><rect x="34" y="33" width="6" height="6" rx="1.500"/><rect x="44" y="33" width="6" height="6" rx="1.500"/>
+    <rect x="14" y="41" width="6" height="6" rx="1.500"/><rect x="24" y="41" width="6" height="6" rx="1.500"/><rect x="44" y="41" width="6" height="6" rx="1.500"/>
+    <rect x="14" y="49" width="6" height="6" rx="1.500"/><rect x="24" y="49" width="6" height="6" rx="1.500"/><rect x="34" y="49" width="6" height="6" rx="1.500"/>
+  </g>
+  <rect x="34" y="41" width="6" height="6" rx="1.500" fill="#0A84FF"/>
+  <rect x="44" y="49" width="6" height="6" rx="1.500" fill="#C9CFDA"/>
+</svg>
