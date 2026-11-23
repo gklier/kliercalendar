@@ -5,7 +5,8 @@
   "use strict";
   const FD = (window.FD = window.FD || { pages: {} });
 
-  const KIND = { lock: "Lock", opening: "Door or window", cover: "Garage or gate", alarm: "Alarm", person: "Person", motion: "Motion sensor", camera: "Camera" };
+  const KIND = { lock: "Lock", opening: "Door or window", cover: "Garage or gate", alarm: "Alarm", person: "Person", motion: "Motion sensor", camera: "Camera",
+    power: "Light or switch", climate: "Thermostat", media: "Media player", vacuum: "Vacuum", sensor: "Sensor", binary: "On/off sensor" };
   const DOMAIN = { lock: "Lock", cover: "Garage or gate", alarm_control_panel: "Alarm", person: "Person", binary_sensor: "Sensor", camera: "Camera" };
   const label = (id, kind) => KIND[kind] || DOMAIN[id.split(".")[0]] || "";
 
@@ -15,12 +16,16 @@
     const connected = !!(ha.url && ha.token.set);
     let ents = ha.entities.map((e) => ({ ...e }));
     let cams = ha.cameras.map((c) => ({ ...c, motion: [...(c.motion || [])] }));
-    let all = null, filter = "all", term = "";                      // what Home Assistant has, once asked
+    let all = null, filter = "suggested", term = "", limit = 60;                      // what Home Assistant has, once asked
 
     page.innerHTML = `
       <h1>Smart home</h1>
       <p class="lede">Show locks, doors, garage doors, the alarm and who's home on the TV, and show cameras in a tile or as a pop-up when there's motion. This uses Home Assistant.</p>
       <p class="hint simple-only" style="margin-left:0">${connected && ha.enabled ? "Connected to Home Assistant." : "Not connected yet. Ask whoever set up the dashboard, or switch on Expert settings."}</p>
+      ${connected && !ha.enabled ? `<div class="group" id="ha-off"><div class="item" style="grid-template-columns:1fr">
+        <p style="margin:0"><b>Home Assistant is switched off,</b> so the TV shows no statuses or cameras. Your connection and choices are saved.</p>
+        <div class="inline"><button type="button" class="primary" id="ha-turn-on">Turn it on</button><span class="msg" id="ha-on-msg" role="status"></span></div>
+      </div></div>` : ""}
 
       <div class="expert-only">
         <h2>Connection</h2>
@@ -78,8 +83,8 @@
 
         <h2>On the screen</h2>
         <div class="group"><div class="item" style="grid-template-columns:1fr">
-          <p style="margin:0">The status strip and the camera tile are extra boxes in the TV layout. Add them here, then move and resize them in <a href="#layout">Layout</a> (under Expert settings).</p>
-          <div class="inline"><button type="button" class="secondary" id="add-home">Add the status strip</button><button type="button" class="secondary" id="add-cam">Add a camera tile</button></div>
+          <p style="margin:0">The status strip, the camera tile and the four-camera wall are extra boxes in the TV layout. Add them here, then move and resize them in <a href="#layout">Layout</a> (under Expert settings).</p>
+          <div class="inline"><button type="button" class="secondary" id="add-home">Add the status strip</button><button type="button" class="secondary" id="add-cam">Add a camera tile</button><button type="button" class="secondary" id="add-wall">Add a 4-camera wall</button></div>
           <span class="sub" style="grid-column:1" id="add-msg" role="status"></span>
         </div></div>
 
@@ -142,28 +147,33 @@
 
     // ---- what Home Assistant has
 
-    const KINDS = [["all", "Everything"], ["lock", "Locks"], ["opening", "Doors and windows"], ["cover", "Garage and gates"], ["alarm", "Alarm"], ["person", "People"], ["motion", "Motion"], ["camera", "Cameras"]];
+    const KINDS = [["suggested", "Suggested"], ["all", "Everything"], ["lock", "Locks"], ["opening", "Doors and windows"], ["cover", "Garage and gates"], ["alarm", "Alarm"], ["person", "People"],
+      ["motion", "Motion"], ["camera", "Cameras"], ["power", "Lights and switches"], ["climate", "Climate"], ["sensor", "Sensors"], ["binary", "On/off sensors"], ["media", "Media"], ["vacuum", "Vacuums"]];
+    const matches = (x, k) => k === "all" || (k === "suggested" ? x.suggested : x.kind === k);
     function drawFound() {
       if (!all) return;
-      $("#kinds").innerHTML = KINDS.map(([k, l]) => `<button type="button" class="wchip${filter === k ? " sel" : ""}" data-k="${k}">${l}</button>`).join("");
+      $("#kinds").innerHTML = KINDS.map(([k, l]) => [k, l, all.filter((x) => matches(x, k)).length]).filter(([k, , n]) => n || k === filter)
+        .map(([k, l, n]) => `<button type="button" class="wchip${filter === k ? " sel" : ""}" data-k="${k}">${l} <small>${n}</small></button>`).join("");
       const have = new Set([...ents.map((e) => e.id), ...cams.map((c) => c.id)]);
-      const rows = all.filter((x) => (filter === "all" || x.kind === filter) && (!term || (x.name + " " + x.id).toLowerCase().includes(term))).slice(0, 60);
-      $("#found").innerHTML = rows.length ? rows.map((x) => `
+      const hits = all.filter((x) => matches(x, term ? "all" : filter) && (!term || (x.name + " " + x.id).toLowerCase().includes(term)));
+      const rows = hits.slice(0, limit);
+      $("#found").innerHTML = (rows.length ? rows.map((x) => `
         <div class="res" role="listitem"><div><b>${esc(x.name)}</b> <small>${esc(label(x.id, x.kind))} · ${esc(x.id)}</small></div>
           <button type="button" class="secondary" data-add="${esc(x.id)}" ${have.has(x.id) ? "disabled" : ""}>${have.has(x.id) ? "Added" : x.kind === "camera" ? "Add camera" : "Add tile"}</button></div>`).join("")
-        : `<p class="sub" style="grid-column:auto">Nothing matches.</p>`;
+        : `<p class="sub" style="grid-column:auto">Nothing matches.</p>`) + (hits.length > limit ? `<button type="button" class="secondary" id="more" style="margin-top:8px">Show ${Math.min(200, hits.length - limit)} more of ${hits.length - limit}</button>` : "");
     }
     $("#load").onclick = async () => {
       const msg = $("#load-msg"); msg.className = "msg"; msg.textContent = "Asking Home Assistant…";
       try {
         all = (await api("ha/entities")).entities;
-        msg.textContent = `${all.length} items found.`; $("#finder").hidden = false;
+        msg.textContent = `${all.length} items found. Suggested ones (locks, doors, alarm, people, motion, cameras) are shown first; pick "Everything" or search for the rest.`; $("#finder").hidden = false;
         sync(); drawFound(); drawCams(); drawTiles();
       } catch (err) { msg.className = "msg bad"; msg.textContent = err.message; }
     };
-    $("#kinds").onclick = (e) => { if (e.target.dataset.k) { filter = e.target.dataset.k; drawFound(); } };
-    $("#find").oninput = (e) => { term = e.target.value.trim().toLowerCase(); drawFound(); };
+    $("#kinds").onclick = (e) => { const b = e.target.closest("[data-k]"); if (b) { filter = b.dataset.k; limit = 60; drawFound(); } };
+    $("#find").oninput = (e) => { term = e.target.value.trim().toLowerCase(); limit = 60; drawFound(); };
     $("#found").onclick = (e) => {
+      if (e.target.id === "more") { limit += 200; return drawFound(); }
       const id = e.target.dataset && e.target.dataset.add; if (!id) return;
       const x = all.find((y) => y.id === id); sync();
       if (x.kind === "camera") { if (cams.length >= 8) return toast("Up to 8 cameras fit."); cams.push({ id, name: x.name, motion: [], popup: true }); drawCams(); }
@@ -173,7 +183,16 @@
 
     // ---- saving
 
-    const conn = () => { const out = { ha: { enabled: $("#ha-on").checked, url: $("#ha-url").value.trim() } }; if ($("#ha-token").value.trim()) out.ha.token = $("#ha-token").value.trim(); return out; };
+    const conn = () => {
+      const out = { ha: { url: $("#ha-url").value.trim() } };
+      if ($("#ha-on").checked !== !!ha.enabled) out.ha.enabled = $("#ha-on").checked;   // untouched: the server switches it on with a new token
+      if ($("#ha-token").value.trim()) out.ha.token = $("#ha-token").value.trim();
+      return out;
+    };
+    const turnOn = $("#ha-turn-on");
+    if (turnOn) turnOn.onclick = async () => {
+      try { await api("settings", { ha: { enabled: true } }); FD.rerender(); } catch (err) { $("#ha-on-msg").className = "msg bad"; $("#ha-on-msg").textContent = err.message; }
+    };
     FD.bindSave($("#ha-conn"), conn, () => FD.rerender());
     $("#ha-test").onclick = () => runTest("ha", conn(), $("#ha-out"));
     FD.bindSave($("#ha-form"), () => {
@@ -194,6 +213,7 @@
       } catch (err) { msg.textContent = err.message; }
     };
     $("#add-home").onclick = () => addTo("home", "Added. The TV updates within a minute; move it in Layout if you like.");
+    $("#add-wall").onclick = () => addTo("camwall", "Added under the Today panel. The TV updates within a minute; choose its four cameras in Layout.");
     $("#add-cam").onclick = () => addTo("camera", "Added. The TV updates within a minute; choose which camera it shows in Layout.");
 
     drawTiles(); drawCams();

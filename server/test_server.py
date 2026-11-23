@@ -144,6 +144,7 @@ def multistatus(*responses):
 
 class Upstream(BaseHTTPRequestHandler):
     posts = []
+    proxy_paths: list = []
     ha_motion = "off"
     fail_tempest = False
     dav_calendars = ["family", "work"]
@@ -182,6 +183,7 @@ class Upstream(BaseHTTPRequestHandler):
                 st = ha_states().get(path[len("/api/states/"):])
                 return self._reply(200, json.dumps(st).encode()) if st else self._reply(404, b'{"message": "Entity not found."}')
             if path.startswith("/api/camera_proxy/"):
+                Upstream.proxy_paths.append(self.path)
                 return self._reply(200, HA_JPEG, "image/jpeg")
             return self._reply(404, b"{}")
         self._reply(404, b"{}")
@@ -614,8 +616,10 @@ class DashboardTest(unittest.TestCase):
             self.assertEqual(by["binary_sensor.front_motion"]["kind"], "motion")
             self.assertEqual(by["camera.front"]["kind"], "camera")
             self.assertEqual(by["alarm_control_panel.house"]["kind"], "alarm")
-            for noise in ("sensor.temp", "binary_sensor.washer"):
-                self.assertNotIn(noise, by)                       # only things worth a tile are offered
+            self.assertEqual(by["sensor.temp"]["kind"], "sensor")  # everything is offered, not just security items
+            self.assertFalse(by["sensor.temp"]["suggested"])
+            self.assertTrue(by["lock.front_door"]["suggested"])
+            self.assertEqual(res["entities"][0]["suggested"], True)  # suggested ones come first
             self.assertEqual(Client(self.base).call("/admin/api/ha/entities")[0], 401)
 
             shown = c.call("/admin/api/settings")[1]
@@ -680,6 +684,29 @@ class DashboardTest(unittest.TestCase):
             server.is_loopback = real
             self.app.config["display"]["shareOnNetwork"] = False
             self.app.save(before)
+
+    def test_ha_snapshot_sizes(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        try:
+            self.ha_connect(c, cameras=[{"id": "camera.front", "name": "Front", "motion": []}], entities=[])
+            Upstream.proxy_paths.clear()
+            self.assertEqual(c.call("/api/ha/camera/camera.front.jpg?w=480")[0], 200)
+            self.assertEqual(c.call("/api/ha/camera/camera.front.jpg?w=99999")[0], 200)     # silly sizes mean "full size"
+            self.assertEqual(c.call("/api/ha/camera/camera.front.jpg?w=abc")[0], 200)
+            asked = [p.split("camera_proxy/")[1] for p in Upstream.proxy_paths]
+            self.assertIn("camera.front?width=480&height=270", asked)
+            self.assertEqual(sum("width=" in a for a in asked), 1)
+            self.assertEqual(sum("width=" not in a for a in asked), 1)                      # both silly ones share one full-size fetch
+        finally:
+            self.app.save(before)
+
+    def test_ha_new_token_switches_it_on(self):
+        base = server.deep_merge(server.DEFAULT_CONFIG, {})
+        cfg = server.apply_settings(base, {"ha": {"url": "http://ha.example:8123", "token": "x" * 40}})
+        self.assertTrue(cfg["ha"]["enabled"])
+        off = server.apply_settings(base, {"ha": {"url": "http://ha.example:8123", "token": "x" * 40, "enabled": False}})
+        self.assertFalse(off["ha"]["enabled"])
 
     def test_ha_motion_popup(self):
         c = self.signed_in()
@@ -981,6 +1008,35 @@ class MergeCopiesTest(unittest.TestCase):
         self.assertEqual(out[0]["calendar"], "Parent")
 
 
+class HADescribeTest(unittest.TestCase):
+    def say(self, eid, state, attrs=None, minutes=0, alert=0):
+        kind = server.ha_kind(eid, attrs)
+        return server.ha_describe(kind, state, minutes, alert, attrs, eid.split(".")[0])
+
+    def test_wording(self):
+        d = self.say("light.kitchen", "on")
+        self.assertEqual((d["text"], d["icon"]), ("On", "bulb"))
+        self.assertEqual(self.say("switch.fan", "off")["tone"], "neutral")
+        self.assertEqual(self.say("sensor.temp", "21.0", {"unit_of_measurement": "°F"})["text"], "21°F")
+        low = self.say("sensor.phone", "12", {"device_class": "battery", "unit_of_measurement": "%"})
+        self.assertEqual((low["text"], low["tone"]), ("Low 12%", "warn"))
+        self.assertEqual(self.say("binary_sensor.leak", "on", {"device_class": "moisture"})["tone"], "bad")
+        self.assertEqual(self.say("binary_sensor.smoke", "off", {"device_class": "smoke"})["text"], "OK")
+        self.assertEqual(self.say("climate.hall", "heat", {"current_temperature": 68, "hvac_action": "heating"})["text"], "68° · Heating")
+        self.assertEqual(self.say("device_tracker.phone", "home")["text"], "Home")
+        self.assertEqual(self.say("media_player.tv", "playing")["text"], "Playing")
+        self.assertEqual(self.say("light.kitchen", "unavailable")["text"], "Unavailable")
+
+    def test_every_icon_exists_on_the_tv(self):
+        js = (Path(__file__).resolve().parent.parent / "web" / "app.js").read_text(encoding="utf-8")
+        for kind, eid, attrs in [("power", "light.a", {}), ("power", "switch.a", {}), ("climate", "climate.a", {}), ("media", "media_player.a", {}),
+                                 ("sensor", "sensor.a", {}), ("binary", "binary_sensor.a", {"device_class": "moisture"}),
+                                 ("binary", "binary_sensor.b", {"device_class": "smoke"})]:
+            for state in ("on", "off", "21"):
+                icon = server.ha_describe(kind, state, 0, 0, attrs, eid.split(".")[0])["icon"]
+                self.assertIn(f"    {icon}: '", js, icon)
+
+
 class SettingsValidationTest(unittest.TestCase):
     base = server.deep_merge(server.DEFAULT_CONFIG, {})
 
@@ -1026,10 +1082,17 @@ class SettingsValidationTest(unittest.TestCase):
         self.assertEqual((r["days"], r["enabled"], len(r["id"]) >= 1), ([4, 5], True, True))
         self.assertEqual((c["display"]["bgColor"], c["display"]["bgGradient"]["angle"], c["display"]["bgPhoto"]), ("#0B1626", 45, "a1.jpg"))
 
+    def test_camera_wall_options(self):
+        box = lambda **kw: {"type": "camwall", "x": 40, "y": 40, "w": 400, "h": 300, **kw}
+        ok = server.apply_settings(self.base, {"layout": {"widgets": [box(options={"cameras": ["camera.a", "camera.b"]})]}})
+        self.assertEqual(ok["layout"]["widgets"][0]["options"], {"cameras": ["camera.a", "camera.b"]})
+        self.bad({"layout": {"widgets": [box(options={"cameras": ["camera.a"] * 5})]}}, "four cameras")
+        self.bad({"layout": {"widgets": [box(options={"cameras": ["lock.front"]})]}}, "four cameras")
+
     def test_home_assistant_settings_are_checked(self):
         self.bad({"ha": {"url": "ftp://x"}}, "http")
         self.bad({"ha": {"token": "short"}}, "long-lived")
-        self.bad({"ha": {"entities": [{"id": "light.kitchen"}]}}, "can't be shown")
+        self.bad({"ha": {"entities": [{"id": "automation.kitchen"}]}}, "can't be shown")
         self.bad({"ha": {"entities": [{"id": "Lock.Front"}]}}, "isn't a Home Assistant item")
         self.bad({"ha": {"entities": [{"id": "lock.a"}] * 25}}, "24")
         self.bad({"ha": {"cameras": [{"id": "lock.front_door"}]}}, "can't be shown")

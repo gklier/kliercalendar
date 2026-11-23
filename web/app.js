@@ -101,6 +101,7 @@
     ticker: { el: () => $("ticker"), base: [1854, 50] },
     home: { el: () => $("home"), base: [1422, 64], display: "flex" },        // Home Assistant status tiles
     camera: { el: () => $("camera"), base: [410, 250], display: "block" },   // one camera, or all in turn
+    camwall: { el: () => $("camwall"), base: [410, 250], display: "grid" },  // up to four cameras, all at once
   };
   const layoutOf = (type) => (cfg.layout && cfg.layout.widgets && cfg.layout.widgets.find((w) => w.type === type)) || null;
   const widgetOpt = (type, key, fallback) => { const w = layoutOf(type); return w && w.options && w.options[key] != null ? w.options[key] : fallback; };
@@ -589,6 +590,13 @@
     motion: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     dot: '<circle cx="12" cy="12" r="4"/>',
+    bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.7.6 1 1.3 1 2.1h5c0-.8.3-1.5 1-2.1A6 6 0 0 0 12 3z"/>',
+    plug: '<path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>',
+    thermo: '<path d="M10 14.5V5a2 2 0 0 1 4 0v9.5a4 4 0 1 1-4 0z"/>',
+    tv: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/>',
+    gauge: '<path d="M4 17a8 8 0 1 1 16 0"/><path d="M12 17l4-5"/>',
+    drop: '<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+    alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4"/><circle cx="12" cy="17" r=".6"/>',
   };
   const hicon = (name) => `<svg class="hi" viewBox="0 0 24 24" aria-hidden="true">${HI[name] || HI.dot}</svg>`;
 
@@ -602,14 +610,15 @@
   }
 
   const camList = () => (state.cameras && state.cameras.cameras) || [];
-  const camURL = (id) => (state.mode === "demo" ? window.Demo.cameraImage(id) : `api/ha/camera/${encodeURIComponent(id)}.jpg?t=${Date.now()}`);
+  // `w` asks the server for a picture that wide: a 4K camera's full snapshot is far more than a tile needs
+  const camURL = (id, w) => (state.mode === "demo" ? window.Demo.cameraImage(id) : `api/ha/camera/${encodeURIComponent(id)}.jpg?w=${w || 640}&t=${Date.now()}`);
 
   // Show a picture in an <img> only once it has loaded, so the tile never flashes blank between refreshes
-  function showPicture(img, id, done) {
+  function showPicture(img, id, done, w) {
     const probe = new Image();
     probe.onload = () => { img.src = probe.src; img.classList.remove("broken"); if (done) done(true); };
     probe.onerror = () => { img.classList.add("broken"); if (done) done(false); };
-    probe.src = camURL(id);
+    probe.src = camURL(id, w);
   }
 
   // The camera tile: the camera chosen for it in Layout, or every camera in turn
@@ -631,13 +640,33 @@
     showPicture(el.querySelector("img"), cam.id);
   }
 
+  // The camera wall: up to four cameras at once (the ones picked in Layout, else the first four)
+  const wall = { timer: 0 };
+  function tickWall() {
+    clearTimeout(wall.timer);
+    const el = $("camwall"), w = layoutOf("camwall");
+    if (!el || !w || w.visible === false || !(cfg.ha && cfg.ha.cameras)) return;
+    wall.timer = setTimeout(tickWall, 2000);
+    const all = camList(), picked = widgetOpt("camwall", "cameras", []);
+    const cams = (picked.length ? picked.map((id) => all.find((c) => c.id === id)).filter(Boolean) : all).slice(0, 4);
+    const cells = el.querySelectorAll(".wall-cell");
+    cells.forEach((cell, n) => {
+      const cam = cams[n];
+      cell.classList.toggle("empty", !cam);
+      if (!cam) return;
+      cell.querySelector(".cam-name").textContent = cam.name;
+      cell.classList.toggle("moving", !!cam.active);
+      showPicture(cell.querySelector("img"), cam.id, null, 480);
+    });
+  }
+
   // The motion pop-up: a big picture that closes itself a while after the motion stops
   const pop = { id: null, timer: 0 };
   function tickPopup() {
     clearTimeout(pop.timer);
     if (!pop.id) return;
     pop.timer = setTimeout(tickPopup, 1000);
-    showPicture($("cam-popup").querySelector("img"), pop.id);
+    showPicture($("cam-popup").querySelector("img"), pop.id, null, 1280);
   }
   function renderCameras() {
     const c = state.cameras, el = $("cam-popup");
@@ -650,6 +679,7 @@
       pop.id = null; clearTimeout(pop.timer); el.hidden = true;
     }
     if (!tile.timer) tickCamera();
+    if (!wall.timer) tickWall();
   }
 
   // ---------- Status ----------
@@ -793,7 +823,7 @@
     cfg.layout = e.data.layout;
     applyLayout();
     const t = $("ticker"); if (t) t.dataset.syms = "";
-    renderCalendar(); renderFocus(); renderTicker(); tickCamera();
+    renderCalendar(); renderFocus(); renderTicker(); tickCamera(); tickWall();
   });
 
   boot();

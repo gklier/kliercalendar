@@ -47,7 +47,7 @@ It started as a replacement for a hosted dashboard service, so it keeps that ser
 - 🏠 **Drive times** to four places that matter, always on screen, inside a **monthly Google Maps budget** (900 reads by default, spread evenly through the month so a busy morning can't use the rest of it).
 - 🌦 **Weather** from a Tempest station, with the next four days, and a **sky** that follows the real weather and the time of day.
 - 📈 **A stock bar** that never stops sliding: prices in green and red with the percent change, for the tickers you choose. Stocks, ETFs, mutual funds, indexes and crypto, from Yahoo Finance, with no account or key.
-- 🔒 **Smart home** (Home Assistant): lock, door, garage, alarm and who's-home tiles with an "All secure" summary and warnings when something has been left open, a camera tile, and a pop-up that covers the screen when a camera sees motion.
+- 🔒 **Smart home** (Home Assistant): lock, door, garage, alarm and who's-home tiles with an "All secure" summary and warnings when something has been left open, lights, thermostats and sensors if you want them, a camera tile, a four-camera wall, and a pop-up that covers the screen when a camera sees motion.
 - 🖼 **Backgrounds**: the weather sky, family photos, one photo, ten gradients, or a flat colour. Light, dark or automatic by sunrise and sunset.
 - 🧩 **A free layout**: drag the clock, resize the calendar, hide what you don't need.
 - 🌙 **Sleep schedules** by day of the week: the screen (and the TV, over HDMI-CEC) switches off and on by itself, with a one-click "sleep now" or "keep awake".

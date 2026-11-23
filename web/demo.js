@@ -193,7 +193,9 @@
     const burst = /[?&]popup=1/.test(location.search) || Math.floor(now.getTime() / 20000) % 9 === 0;   // a pretend motion event now and then
     return {
       cameras: [{ id: "camera.front", name: "Front door", active: burst, popup: true, since: null },
-                { id: "camera.driveway", name: "Driveway", active: false, popup: true, since: null }],
+                { id: "camera.driveway", name: "Driveway", active: false, popup: true, since: null },
+                { id: "camera.backyard", name: "Backyard", active: false, popup: true, since: null },
+                { id: "camera.garage", name: "Garage", active: false, popup: true, since: null }],
       popup: true, seconds: 30, updated: Math.floor(now.getTime() / 1000),
     };
   }

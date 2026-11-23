@@ -238,12 +238,15 @@ def _choice(v: Any, name: str, options: set) -> str:
 
 
 ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
-HA_STATUS_DOMAINS = {"lock", "cover", "binary_sensor", "alarm_control_panel", "person"}
+# Anything Home Assistant has that makes sense as a tile on a TV
+HA_STATUS_DOMAINS = {"lock", "cover", "binary_sensor", "alarm_control_panel", "person", "device_tracker", "light", "switch",
+                     "climate", "fan", "sensor", "media_player", "vacuum", "input_boolean"}
+HA_SUGGESTED = {"lock", "cover", "alarm", "person", "opening", "motion", "camera"}    # the security-minded kinds, offered first
 HA_TOKEN = re.compile(r"^[A-Za-z0-9._~+/=-]{20,2000}$")
 BG_CHOICES = {"sky", "photos", "photo", "gradient", "color"}
 APPEARANCE = {"auto", "light", "dark"}
 PHOTO_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-LAYOUT_TYPES = ("clock", "weather", "drive", "calendar", "focus", "ticker", "home", "camera")
+LAYOUT_TYPES = ("clock", "weather", "drive", "calendar", "focus", "ticker", "home", "camera", "camwall")
 
 
 def normalize_symbol(sym: str) -> str:
@@ -329,6 +332,12 @@ def _layout(v: Any) -> dict | None:
             if cam and (not isinstance(cam, str) or not ENTITY_ID.match(cam) or not cam.startswith("camera.")):
                 raise ValueError("Pick a camera from the list")
             item["options"] = {"camera": cam}
+        elif t == "camwall":
+            cams = o.get("cameras", [])
+            if (not isinstance(cams, list) or len(cams) > 4
+                    or any(not isinstance(x, str) or not x.startswith("camera.") or not ENTITY_ID.match(x) for x in cams)):
+                raise ValueError("Pick up to four cameras from the list")
+            item["options"] = {"cameras": cams}
         out.append(item)
     return {"version": 1, "widgets": out}
 
@@ -357,6 +366,8 @@ def _ha(patch: dict, cur: dict) -> dict:
         if not HA_TOKEN.match(tok):
             raise ValueError("That doesn't look like a long-lived access token. Copy the whole token from your Home Assistant profile.")
         c["token"] = tok
+        if "enabled" not in patch:
+            c["enabled"] = True                  # a new token means "use it"; nobody connects Home Assistant to leave it off
     if "entities" in patch:
         ents = patch["entities"]
         if not isinstance(ents, list) or len(ents) > 24:
@@ -1340,16 +1351,25 @@ class StockSource(Source):
 
 def ha_kind(entity_id: str, attrs: dict | None) -> str:
     domain = entity_id.split(".", 1)[0]
-    if domain in ("lock", "cover", "person"):
+    dc = (attrs or {}).get("device_class")
+    if domain in ("lock", "cover"):
         return domain
     if domain == "alarm_control_panel":
         return "alarm"
+    if domain in ("person", "device_tracker"):
+        return "person"
+    if domain in ("light", "switch", "fan", "input_boolean"):
+        return "power"
+    if domain in ("climate", "vacuum", "sensor"):
+        return domain
+    if domain == "media_player":
+        return "media"
     if domain == "binary_sensor":
-        dc = (attrs or {}).get("device_class")
         if dc in ("door", "window", "garage_door", "opening"):
             return "opening"
         if dc in ("motion", "occupancy", "presence", "moving"):
             return "motion"
+        return "binary"
     return "other"
 
 
@@ -1357,10 +1377,19 @@ def _span(minutes: int) -> str:
     return f"{minutes} min" if minutes < 90 else f"{round(minutes / 60)} h"
 
 
-def ha_describe(kind: str, state: str, minutes: int, alert: int, attrs: dict | None = None) -> dict:
+def _number(state: str) -> str:
+    try:
+        v = float(state)
+    except ValueError:
+        return state
+    return str(int(v)) if v == int(v) else f"{v:.1f}"
+
+
+def ha_describe(kind: str, state: str, minutes: int, alert: int, attrs: dict | None = None, domain: str = "") -> dict:
     """What a tile says and how worried it should look: tone is good, warn, bad or neutral."""
+    attrs = attrs or {}
     tone, text, icon = "neutral", state.replace("_", " ").capitalize(), "dot"
-    dc = (attrs or {}).get("device_class")
+    dc = attrs.get("device_class")
     if state in ("unavailable", "unknown", "missing"):
         return {"text": "Unavailable", "tone": "neutral", "icon": "dot"}
     late = bool(alert) and minutes >= alert
@@ -1395,6 +1424,44 @@ def ha_describe(kind: str, state: str, minutes: int, alert: int, attrs: dict | N
     elif kind == "motion":
         icon = "motion"
         text, tone = ("Motion", "warn") if state == "on" else ("Clear", "neutral")
+    elif kind == "power":
+        icon = "bulb" if domain == "light" else "plug"
+        text, tone = ("On", "warn") if state == "on" else ("Off", "neutral")
+    elif kind == "climate":
+        icon = "thermo"
+        cur, action = attrs.get("current_temperature"), str(attrs.get("hvac_action") or "")
+        text = (f"{_number(str(cur))}°" if cur is not None else "") + (f" · {action.capitalize()}" if action not in ("", "idle", "off") else "")
+        text = text.strip(" ·") or ("Off" if state == "off" else state.replace("_", " ").capitalize())
+    elif kind == "media":
+        icon = "tv"
+        text = {"playing": "Playing", "paused": "Paused", "idle": "Idle", "off": "Off", "standby": "Standby", "on": "On", "buffering": "Buffering"}.get(state, text)
+    elif kind == "vacuum":
+        text, tone = {"cleaning": ("Cleaning", "warn"), "docked": ("Docked", "good"), "returning": ("Returning", "neutral"),
+                      "paused": ("Paused", "neutral"), "error": ("Error", "bad")}.get(state, (text, "neutral"))
+    elif kind == "sensor":
+        icon = "gauge"
+        unit = str(attrs.get("unit_of_measurement") or "")
+        text = f"{_number(state)}{'' if unit in ('°F', '°C', '%') else ' '}{unit}".strip()
+        if dc == "battery":
+            try:
+                if float(state) <= 20:
+                    text, tone = f"Low {text}", "warn"
+            except ValueError:
+                pass
+    elif kind == "binary":
+        on = state == "on"
+        if dc == "moisture":
+            icon, (text, tone) = "drop", (("Wet", "bad") if on else ("Dry", "good"))
+        elif dc in ("smoke", "gas", "carbon_monoxide", "safety", "tamper", "problem"):
+            icon, (text, tone) = "alert", ((dc.replace("_", " ").capitalize() if dc != "problem" else "Problem", "bad") if on else ("OK", "good"))
+        elif dc == "battery":
+            text, tone = ("Low", "warn") if on else ("OK", "good")
+        elif dc == "lock":                                        # Home Assistant's lock-type sensor is "on" when unlocked
+            icon, (text, tone) = ("unlock", ("Unlocked", "bad")) if on else ("lock", ("Locked", "good"))
+        elif dc == "connectivity":
+            text, tone = ("Online", "good") if on else ("Offline", "warn")
+        else:
+            text, tone = ("On", "warn") if on else ("Off", "neutral")
     return {"text": text, "tone": tone, "icon": icon}
 
 
@@ -1432,19 +1499,22 @@ class HomeAssistant:
         return f"Connected to {cfg.get('location_name') or 'Home Assistant'} (Home Assistant {cfg.get('version', '?')})."
 
     def entities(self) -> list:
-        """Everything worth putting on the TV: locks, doors, covers, the alarm, people, motion sensors and cameras."""
+        """Everything Home Assistant has that can show as a tile, plus the cameras. `suggested` marks the
+        security-minded ones (locks, doors, alarm, people, motion, cameras), which the picker offers first."""
         out = []
         for st in self._json("/api/states"):
             eid = st.get("entity_id", "")
             attrs = st.get("attributes") or {}
             domain = eid.split(".", 1)[0]
+            if not ENTITY_ID.match(eid):
+                continue
             kind = "camera" if domain == "camera" else ha_kind(eid, attrs)
-            if not ENTITY_ID.match(eid) or kind == "other" or (domain == "binary_sensor" and kind not in ("opening", "motion")):
+            if kind == "other":
                 continue
             out.append({"id": eid, "name": str(attrs.get("friendly_name") or eid)[:60], "domain": domain, "kind": kind,
-                        "state": str(st.get("state", ""))})
-        out.sort(key=lambda x: (x["kind"], x["name"].lower()))
-        return out[:600]
+                        "state": str(st.get("state", ""))[:30], "suggested": kind in HA_SUGGESTED and domain != "device_tracker"})
+        out.sort(key=lambda x: (not x["suggested"], x["kind"], x["name"].lower()))
+        return out[:3000]
 
     def _state(self, eid: str) -> dict | None:
         try:
@@ -1458,7 +1528,9 @@ class HomeAssistant:
         """The status tiles: one line per chosen item, and a summary of whether anything needs attention."""
         from concurrent.futures import ThreadPoolExecutor
         ents = self.cfg.get("entities") or []
-        if not self.cfg.get("enabled") or not ents:
+        if not self.cfg.get("enabled"):
+            raise UpstreamError("Home Assistant is switched off. Turn it on in Settings → Smart home")
+        if not ents:
             raise UpstreamError("No Home Assistant items are chosen. Add some in Settings → Smart home")
         alert = int(self.cfg.get("alert_minutes", 10))
         with ThreadPoolExecutor(max_workers=6) as pool:
@@ -1476,7 +1548,7 @@ class HomeAssistant:
                 pass
             kind = ha_kind(e["id"], attrs)
             items.append({"id": e["id"], "name": e["name"] or str(attrs.get("friendly_name") or e["id"]), "kind": kind,
-                          "state": state, "minutes": minutes, **ha_describe(kind, state, minutes, alert, attrs)})
+                          "state": state, "minutes": minutes, **ha_describe(kind, state, minutes, alert, attrs, e["id"].split(".", 1)[0])})
         bad = [i for i in items if i["tone"] == "bad"]
         secure_kinds = [i for i in items if i["kind"] in ("lock", "opening", "cover")]
         if bad:
@@ -1493,7 +1565,9 @@ class HomeAssistant:
     def cameras_state(self) -> dict:
         """Which cameras have motion right now (or had it within the pop-up time), for the pop-up."""
         cams = self.cfg.get("cameras") or []
-        if not self.cfg.get("enabled") or not cams:
+        if not self.cfg.get("enabled"):
+            raise UpstreamError("Home Assistant is switched off. Turn it on in Settings → Smart home")
+        if not cams:
             raise UpstreamError("No cameras are chosen. Add some in Settings → Smart home")
         grace = int(self.cfg["popup"]["seconds"])
         now = time.time()
@@ -1515,20 +1589,24 @@ class HomeAssistant:
                         "popup": bool(cam.get("popup", True))})
         return {"cameras": out, "popup": bool(self.cfg["popup"]["enabled"]), "seconds": grace, "updated": int(now)}
 
-    def snapshot(self, camera_id: str) -> tuple[bytes, str]:
-        """A still picture from one of the chosen cameras, shared for a second so many viewers don't hammer the camera."""
+    def snapshot(self, camera_id: str, width: int | None = None) -> tuple[bytes, str]:
+        """A still picture from one of the chosen cameras, shared for a second so many viewers don't hammer the camera.
+        With a width, Home Assistant is asked for a picture that size: a 4K camera's full snapshot is far more
+        than a tile on a Pi needs."""
         if camera_id not in {c["id"] for c in (self.cfg.get("cameras") or [])} or not self.cfg.get("enabled"):
             raise PermissionError("That camera isn't on the dashboard")
+        key = f"{camera_id}|{width or 0}"
         with self.lock:
-            hit = self.snaps.get(camera_id)
+            hit = self.snaps.get(key)
         if hit and time.time() - hit[0] < 1.0:
             return hit[1], hit[2]
-        blob = self._get(f"/api/camera_proxy/{camera_id}", timeout=10)
+        path = f"/api/camera_proxy/{camera_id}" + (f"?width={width}&height={round(width * 9 / 16)}" if width else "")
+        blob = self._get(path, timeout=10)
         if len(blob) > 8_000_000:
             raise UpstreamError("The camera's picture is too large")
         ctype = "image/png" if blob[:4] == b"\x89PNG" else "image/jpeg"
         with self.lock:
-            self.snaps[camera_id] = (time.time(), blob, ctype)
+            self.snaps[key] = (time.time(), blob, ctype)
         return blob, ctype
 
 
@@ -2000,8 +2078,9 @@ def make_handler(app: App):
             if path.startswith("/api/ha/camera/"):
                 cid = urllib.parse.unquote(path[len("/api/ha/camera/"):])
                 cid = cid[:-4] if cid.endswith(".jpg") else cid
+                w = (q.get("w") or [""])[0]
                 try:
-                    blob, ctype = app.ha.snapshot(cid)
+                    blob, ctype = app.ha.snapshot(cid, int(w) if w.isdigit() and 160 <= int(w) <= 1920 else None)
                 except PermissionError as e:
                     return self._json(404, {"error": str(e)})
                 except UpstreamError as e:

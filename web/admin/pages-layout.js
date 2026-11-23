@@ -5,7 +5,7 @@
   "use strict";
   const FD = (window.FD = window.FD || { pages: {} });
   const W = 1920, H = 1080, STEP = 10, MIN_W = 80, MIN_H = 40;
-  const NAMES = { clock: "Clock", weather: "Weather", drive: "Drive times", calendar: "Calendar", focus: "Today panel", ticker: "Stock bar", home: "Home status", camera: "Camera" };
+  const NAMES = { clock: "Clock", weather: "Weather", drive: "Drive times", calendar: "Calendar", focus: "Today panel", ticker: "Stock bar", home: "Home status", camera: "Camera", camwall: "4-camera wall" };
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const snap = (n) => Math.round(n / STEP) * STEP;
 
@@ -22,6 +22,7 @@
       // Home Assistant widgets start switched off: the Smart home page (or the box below) turns them on
       { type: "home", x: 32, y: 214, w: 1422, h: 64, visible: false, scale: "auto" },
       { type: "camera", x: 1478, y: 654, w: 410, h: 326, visible: false, scale: "auto", options: { camera: "" } },
+      { type: "camwall", x: 1478, y: 614, w: 410, h: 366, visible: false, scale: "auto", options: { cameras: [] } },
     ];
   }
 
@@ -40,6 +41,12 @@
       if (foc.y === 214 && foc.h > 500) foc.h = 416;             // the tile sits under the Today panel, which gives up its lower part
       const top = foc.y + foc.h + 24;
       Object.assign(me, { x: foc.x, y: top, w: foc.w, h: Math.max(cal.y + cal.h - top, 160) });
+    }
+    if (type === "camwall") {
+      const one = get("camera"); if (one) one.visible = false;   // the wall replaces the single tile
+      if (foc.y === 214 && foc.h > 420) foc.h = 366;             // under the Today panel, which gives up its lower part
+      const top = foc.y + foc.h + 24;
+      Object.assign(me, { x: foc.x, y: top, w: foc.w, h: Math.max(cal.y + cal.h - top, 240) });
     }
     const res = await FD.api("settings", { layout: { version: 1, widgets } });
     FD.settings = res.settings;
@@ -94,6 +101,8 @@
             <select id="f-days">${[[7, "1 week"], [14, "2 weeks"], [21, "3 weeks"], [28, "4 weeks"]].map(([v, l]) => `<option value="${v}" ${(w.options && w.options.days) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
           ${selected === "camera" ? `<label class="tfield">Shows
             <select id="f-cam"><option value="">Each camera in turn</option>${(FD.settings.ha.cameras || []).map((c) => `<option value="${esc(c.id)}" ${(w.options && w.options.camera) === c.id ? "selected" : ""}>${esc(c.name || c.id)}</option>`).join("")}</select></label>` : ""}
+          ${selected === "camwall" ? [0, 1, 2, 3].map((n) => `<label class="tfield">Camera ${n + 1}
+            <select class="f-wall" data-n="${n}"><option value="">${n === 0 ? "First camera" : "None"}</option>${(FD.settings.ha.cameras || []).map((c) => `<option value="${esc(c.id)}" ${((w.options && w.options.cameras) || [])[n] === c.id ? "selected" : ""}>${esc(c.name || c.id)}</option>`).join("")}</select></label>`).join("") : ""}
           ${selected === "ticker" ? `<label class="tfield">Speed
             <select id="f-speed">${[[60, "Slow"], [90, "Normal"], [130, "Fast"]].map(([v, l]) => `<option value="${v}" ${(w.options && w.options.speed) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
           <label class="show"><input type="checkbox" id="f-vis" ${w.visible ? "checked" : ""}> Show on the TV</label>
@@ -106,6 +115,7 @@
       $("#f-vis").onchange = (e) => { w.visible = e.target.checked; changed(); drawList(); };
       const days = $("#f-days"); if (days) days.onchange = (e) => { w.options = { days: Number(e.target.value) }; changed(); };
       const speed = $("#f-speed"); if (speed) speed.onchange = (e) => { w.options = { speed: Number(e.target.value) }; changed(); };
+      $$(".f-wall").forEach((sel) => { sel.onchange = () => { w.options = { cameras: $$(".f-wall").map((x) => x.value).filter(Boolean) }; changed(); }; });
       const cam = $("#f-cam"); if (cam) cam.onchange = (e) => { w.options = { camera: e.target.value }; changed(); };
     }
 
