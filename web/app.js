@@ -488,8 +488,9 @@
 
     el.innerHTML = `
       <div class="focus-head"><h2>${isToday ? "Today" : "Tomorrow"}</h2><span class="sub">${day.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" })}</span></div>
-      ${chips}${next}${empty}
+      <div class="focus-main">${chips}${next}${empty}</div>
       <div class="agenda" id="agenda">${rows}</div>`;
+    el.classList.toggle("wide", el.clientWidth > 640 && el.clientWidth > el.clientHeight * 1.5);
     trimToFit($("agenda"), ".row", "more");
     for (const ev of timed) if (ev.s > now) ensureRoute(ev, now);
   }
@@ -628,7 +629,8 @@
   // Show a picture in an <img> only once it has loaded, so the tile never flashes blank between refreshes
   function showPicture(img, id, done, w) {
     const probe = new Image();
-    probe.onload = () => { img.src = probe.src; img.classList.remove("broken"); if (done) done(true); };
+    const show = () => { img.src = probe.src; img.classList.remove("broken"); if (done) done(true); };
+    probe.onload = () => { if (probe.decode) probe.decode().then(show, show); else show(); };   // decoded before it is swapped in, so the picture can't make the screen hitch
     probe.onerror = () => { img.classList.add("broken"); if (done) done(false); };
     probe.src = camURL(id, w);
   }
@@ -668,7 +670,8 @@
       if (!cam) return;
       cell.querySelector(".cam-name").textContent = cam.name;
       cell.classList.toggle("moving", !!cam.active);
-      showPicture(cell.querySelector("img"), cam.id, null, Math.min(1280, Math.max(480, Math.ceil(cell.offsetWidth / 160) * 160)));   // a big wall asks for sharper pictures
+      const wide = Math.min(1280, Math.max(480, Math.ceil(cell.offsetWidth / 160) * 160));   // a big wall asks for sharper pictures
+      setTimeout(() => showPicture(cell.querySelector("img"), cam.id, null, wide), n * 450);   // one camera at a time, not all four at once
     });
   }
 

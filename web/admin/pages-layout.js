@@ -34,7 +34,7 @@
       // The top row and the stock bar keep their usual sizes, so their text is as easy to read as ever
       clock: [32, 30, 340, 160], weather: [396, 30, 660, 160], drive: [1080, 30, 808, 160],
       home: [32, 214, 900, 64], camwall: [32, homeOn ? 292 : 214, 900, homeOn ? 688 : 766],
-      calendar: [956, 214, 932, 470], focus: [956, 708, 932, 272], ticker: [32, 1004, 1856, 50],
+      calendar: [956, 214, 932, 400], focus: [956, 638, 932, 342], ticker: [32, 1004, 1856, 50],
     };
     return base.map((b) => {
       const w = { ...b, options: b.options ? { ...b.options } : undefined };
@@ -42,7 +42,7 @@
       if (at) Object.assign(w, { x: at[0], y: at[1], w: at[2], h: at[3], visible: true });
       if (b.type === "home") { w.visible = homeOn; w.scale = 1; }       // normal text size; the strip shows "+N more" if it runs out of room
       if (b.type === "camera") w.visible = false;                           // the wall replaces the single tile
-      if (b.type === "camwall") w.options = { cameras: cams };
+      if (b.type === "camwall") { w.options = { cameras: cams }; w.scale = 1; }   // normal-size camera names, however big the wall is
       if (b.type === "calendar") w.options = { days: 7 };               // the calendar fits its columns to its width
       if (!w.options) delete w.options;
       return w;

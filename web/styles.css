@@ -309,6 +309,15 @@ body.free .stage { display: block; }
 
 .focus { grid-column: 4; grid-row: 2; padding: 22px 22px 18px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
 
+.focus-main { display: contents; }
+/* A wide, short Today panel: the next event on the left, the rest of the day on the right */
+.focus.wide { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); column-gap: 24px; row-gap: 10px; }
+.focus.wide .focus-head { grid-column: 1 / -1; }
+.focus.wide .focus-main { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden; }
+.focus.wide .next { padding: 14px 18px; }
+.focus.wide .next-title { font-size: 26px; margin-top: 6px; -webkit-line-clamp: 1; }
+.focus.wide .next-time { font-size: 36px; }
+.focus.wide .next-where, .focus.wide .next-who { display: none; }   /* the day's people and place are in the calendar; keep the drive time in view */
 .focus-head { display: flex; align-items: baseline; justify-content: space-between; padding: 0 4px; }
 .focus-head h2 { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; }
 .focus-head .sub { font-size: 17px; font-weight: 600; color: var(--ink-2); }
