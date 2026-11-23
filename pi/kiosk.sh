@@ -15,11 +15,17 @@ SERVER="${SERVER:-http://localhost:${PORT:-8080}}"
 SERVER="${SERVER%/}"
 
 ask() {
+  local out first
   if [ -n "${TV_KEY:-}" ]; then
-    curl -fsS --max-time 8 -H "Authorization: Bearer $TV_KEY" "$SERVER/api/screen-url" 2>/dev/null
+    out=$(curl -fsS --max-time 8 -H "Authorization: Bearer $TV_KEY" "$SERVER/api/screen-url" 2>/dev/null) || return 1
   else
-    curl -fsS --max-time 3 "$SERVER/api/screen-url" 2>/dev/null
+    out=$(curl -fsS --max-time 3 "$SERVER/api/screen-url" 2>/dev/null) || return 1
   fi
+  # Only a page on the dashboard itself is believed. A captive portal, a proxy error page or a half answer
+  # is "no answer", so the TV keeps what it has instead of opening something strange.
+  first=$(printf '%s\n' "$out" | head -n1)
+  [[ "$first" =~ ^(/[^[:space:]]*|https?://(localhost|127\.0\.0\.1)(:[0-9]+)?/[^[:space:]]*)$ ]] || return 1
+  printf '%s\n' "$out"
 }
 
 # The server answers a path on itself (/?mode=live).

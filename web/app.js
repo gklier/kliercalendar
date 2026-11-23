@@ -605,8 +605,16 @@
     if (!el) return;
     const h = state.home;
     if (!h || !h.items) { el.innerHTML = `<p class="note">${waiting("home", "Choose what to show in Settings → Smart home.")}</p>`; return; }
-    const sum = h.summary && h.summary.text ? `<div class="hsum ${esc(h.summary.tone)}">${h.summary.tone === "good" ? hicon("check") : ""}${esc(h.summary.text)}</div>` : "";
-    el.innerHTML = sum + h.items.map((i) => `<div class="hs ${esc(i.tone)}">${hicon(i.icon)}<b>${esc(i.name)}</b><span>${esc(i.text)}</span></div>`).join("");
+    const sum = h.summary && h.summary.text ? `<div class="hsum ${esc(h.summary.tone)}">${h.summary.tone === "good" ? hicon("check") : ""}<span class="t">${esc(h.summary.text.split(":")[0])}</span></div>` : "";
+    // Problems first, so a long list can never push a warning out of sight
+    const rank = { bad: 0, warn: 1, neutral: 2, good: 3 };
+    const items = h.items.map((i, n) => [i, n]).sort((x, y) => (rank[x[0].tone] ?? 2) - (rank[y[0].tone] ?? 2) || x[1] - y[1]).map((x) => x[0]);
+    const tiles = items.map((i) => `<div class="hs ${esc(i.tone)}">${hicon(i.icon)}<b>${esc(i.name)}</b><span>${esc(i.text)}</span></div>`);
+    const draw = (shown) => { el.innerHTML = sum + tiles.slice(0, shown).join("") + (shown < tiles.length ? `<div class="hs more">+${tiles.length - shown} more</div>` : ""); };
+    // One row only: show as many as fit, then "+N more". Nothing ever wraps onto a second line.
+    let shown = tiles.length;
+    draw(shown);
+    while (shown > 1 && el.scrollWidth > el.clientWidth + 1) draw(--shown);
   }
 
   const camList = () => (state.cameras && state.cameras.cameras) || [];
@@ -823,7 +831,7 @@
     cfg.layout = e.data.layout;
     applyLayout();
     const t = $("ticker"); if (t) t.dataset.syms = "";
-    renderCalendar(); renderFocus(); renderTicker(); tickCamera(); tickWall();
+    renderCalendar(); renderFocus(); renderTicker(); renderHome(); tickCamera(); tickWall();
   });
 
   boot();

@@ -183,11 +183,15 @@
   // Sample Home Assistant tiles and cameras, for the layout editor's preview and ?mode=demo
   function home() {
     const t = (name, text, tone, icon) => ({ id: name, name, kind: "x", state: "", minutes: 0, text, tone, icon });
-    return {
-      items: [t("Front door", "Locked", "good", "lock"), t("Back door", "Locked", "good", "lock"), t("Garage", "Closed", "good", "garage"),
-              t("Alarm", "Armed home", "good", "shield"), t("Alex", "Home", "good", "person"), t("Sam", "Away", "neutral", "person")],
-      summary: { text: "All secure", tone: "good" }, updated: Math.floor(Date.now() / 1000),
-    };
+    const items = [t("Front door", "Locked", "good", "lock"), t("Back door", "Locked", "good", "lock"), t("Garage", "Closed", "good", "garage"),
+                   t("Alarm", "Armed home", "good", "shield"), t("Alex", "Home", "good", "person"), t("Sam", "Away", "neutral", "person")];
+    // ?busy=1 shows the crowded case: a warning with a long name, and more tiles than fit on one row
+    if (/[?&]busy=1/.test(location.search)) {
+      items.unshift(t("Interior garage door", "Unlocked 30 min", "bad", "unlock"));
+      items.push(t("Living room lights", "On", "warn", "bulb"), t("Basement sensor", "Dry", "good", "drop"), t("Thermostat", "68° · Heating", "neutral", "thermo"));
+      return { items, summary: { text: "Needs attention: Interior garage door", tone: "bad" }, updated: Math.floor(Date.now() / 1000) };
+    }
+    return { items, summary: { text: "All secure", tone: "good" }, updated: Math.floor(Date.now() / 1000) };
   }
   function cameras(now) {
     const burst = /[?&]popup=1/.test(location.search) || Math.floor(now.getTime() / 20000) % 9 === 0;   // a pretend motion event now and then

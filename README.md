@@ -182,6 +182,7 @@ venv/bin/python server/server.py --config /tmp/fd/config.json --state-dir /tmp/f
 
 # Tests
 cd server && ../venv/bin/python -m unittest test_server.py
+cd server && ../venv/bin/python -m unittest test_chaos.py      # hostile input, lying services, damaged data (about 30 s)
 cd pi && python3 -m unittest test_kiosk_setup.py
 ```
 
@@ -197,6 +198,6 @@ docs/      Screenshots and design notes
 
 ## Ideas on the list
 
-Smooth live camera video and quiet hours for pop-ups: see the last section of [docs/home-assistant.md](docs/home-assistant.md).
+See [docs/ROADMAP.md](docs/ROADMAP.md) for what could come next, and the last section of [docs/home-assistant.md](docs/home-assistant.md) for smart-home ideas.
 
 <div align="center"><br><sub>A family project, shared as it is.</sub></div>

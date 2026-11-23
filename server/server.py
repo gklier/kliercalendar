@@ -36,6 +36,7 @@ import copy
 import datetime as dt
 import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import logging
@@ -89,11 +90,25 @@ class UpstreamError(Exception):
 # --------------------------------------------------------------------------
 
 def http_request(url: str, *, data: bytes | None = None, headers: dict | None = None,
-                 timeout: float = 20.0, method: str | None = None) -> bytes:
+                 timeout: float = 20.0, method: str | None = None, max_bytes: int = 30_000_000) -> bytes:
+    """One outbound request. `timeout` limits each wait; the whole answer must also arrive within twice that
+    (a service that drips a byte at a time can't hold a worker), and within `max_bytes`."""
     req = urllib.request.Request(url, data=data, method=method, headers={"User-Agent": USER_AGENT, **(headers or {})})
+    host = urllib.parse.urlsplit(url).netloc
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+            deadline = time.monotonic() + max(timeout * 2, 10)
+            chunks, size = [], 0
+            while True:
+                chunk = resp.read1(65536)
+                if not chunk:
+                    return b"".join(chunks)
+                size += len(chunk)
+                if size > max_bytes:
+                    raise UpstreamError(f"{host} sent more than {max_bytes // 1_000_000} MB")
+                if time.monotonic() > deadline:
+                    raise UpstreamError(f"{host} took too long to answer")
+                chunks.append(chunk)
     except urllib.error.HTTPError as e:
         if e.code == 401 and "calendar/dav" in url:
             raise UpstreamError("Google didn't accept the email and app password. Check both, then try again.") from None
@@ -102,7 +117,9 @@ def http_request(url: str, *, data: bytes | None = None, headers: dict | None = 
     except urllib.error.URLError as e:
         raise UpstreamError(f"Cannot reach {urllib.parse.urlsplit(url).netloc}: {e.reason}") from None
     except TimeoutError:
-        raise UpstreamError(f"{urllib.parse.urlsplit(url).netloc} took too long to answer") from None
+        raise UpstreamError(f"{host} took too long to answer") from None
+    except (http.client.HTTPException, OSError, ValueError) as e:    # cut off mid-answer, reset, bad redirect or the like
+        raise UpstreamError(f"{host} sent a broken answer ({type(e).__name__})") from None
 
 
 def http_json(url: str, **kw) -> Any:
@@ -179,15 +196,32 @@ class Store:
         # First run starts from the family's seed settings, if present
         source = path if path.exists() else seed if seed and seed.exists() else None
         try:
-            raw = json.loads(source.read_text()) if source else {}
+            text = source.read_text(encoding="utf-8-sig").strip() if source else ""
+            raw = json.loads(text) if text else {}          # an empty file holds nothing to lose: start fresh
         except ValueError as e:
+            # Not guessing: starting fresh would overwrite whatever is recoverable in the file
             sys.exit(f"Settings file is not valid JSON ({source}): {e}")
-        self.data = deep_merge(DEFAULT_CONFIG, raw)
+        if not isinstance(raw, dict):
+            sys.exit(f"Settings file should hold a JSON object ({source}), not {type(raw).__name__}")
+        self.data = deep_merge(DEFAULT_CONFIG, self._well_shaped(DEFAULT_CONFIG, raw))
         for cal in self.data["calendar"]["calendars"]:
             cal.setdefault("id", secrets.token_hex(4))
             cal.setdefault("enabled", True)
             cal.setdefault("color", "#0A84FF")
             cal.setdefault("ics_url", "")
+
+    @staticmethod
+    def _well_shaped(default: dict, raw: dict, path: str = "") -> dict:
+        """Drop settings whose type is wrong (a section that is a number, a list that is text) so they fall back to
+        their defaults instead of crashing the server later."""
+        out = {}
+        for key, value in raw.items():
+            want = default.get(key)
+            if isinstance(want, dict) and not isinstance(value, dict) or isinstance(want, list) and not isinstance(value, list):
+                log.warning("Ignoring the setting %s%s in the settings file: wrong type", path, key)
+                continue
+            out[key] = Store._well_shaped(want, value, f"{path}{key}.") if isinstance(want, dict) else value
+        return out
 
     @property
     def version(self) -> str:
@@ -423,10 +457,30 @@ def _url(v: str, name: str) -> str:
     return "https" + v[6:] if v.startswith("webcal") else v
 
 
+def _shape_check(default: dict, patch: dict, path: str = "") -> None:
+    """A section must arrive as a section; the validators below deal with each field (some, like symbols, take text or a list)."""
+    for key, value in patch.items():
+        want = default.get(key)
+        if isinstance(want, dict) and not isinstance(value, dict):
+            raise ValueError(f"The {path}{key} settings must be an object")
+        if isinstance(want, dict):
+            _shape_check(want, value, f"{path}{key} ")
+
+
 def apply_settings(current: dict, patch: dict) -> dict:
     """Return a new config with the admin's changes applied, or raise ValueError."""
     if not isinstance(patch, dict):
         raise ValueError("Settings must be an object")
+    _shape_check(DEFAULT_CONFIG, patch)
+    try:
+        return _apply_settings(current, patch)
+    except (TypeError, AttributeError, KeyError, IndexError, OverflowError) as e:
+        # The work is done on a copy, so nothing was half-changed. Say no, rather than crash the request.
+        log.warning("Settings in an unexpected shape (%s: %s)", type(e).__name__, e)
+        raise ValueError("Those settings aren't in the shape the dashboard expects") from None
+
+
+def _apply_settings(current: dict, patch: dict) -> dict:
     c = copy.deepcopy(current)
     c["stocks"].pop("api_key", None)        # an old Finnhub key: prices come from Yahoo now, so don't keep a secret nobody uses
 
@@ -1470,12 +1524,12 @@ class HomeAssistant:
         self.motion_since: dict[str, float] = {}
         self.motion_last: dict[str, float] = {}
 
-    def _get(self, path: str, timeout: float = 8.0) -> bytes:
+    def _get(self, path: str, timeout: float = 8.0, max_bytes: int = 30_000_000) -> bytes:
         base, token = self.cfg.get("url", ""), self.cfg.get("token", "")
         if not base or not token:
             raise UpstreamError("Connect Home Assistant in Settings → Smart home")
         try:
-            return http_request(base.rstrip("/") + path, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+            return http_request(base.rstrip("/") + path, headers={"Authorization": f"Bearer {token}"}, timeout=timeout, max_bytes=max_bytes)
         except UpstreamError as e:
             if "HTTP 401" in str(e):
                 raise UpstreamError("Home Assistant didn't accept the token. Make a new long-lived token in your Home Assistant profile.") from None
@@ -1496,12 +1550,17 @@ class HomeAssistant:
         """Everything Home Assistant has that can show as a tile, plus the cameras. `suggested` marks the
         security-minded ones (locks, doors, alarm, people, motion, cameras), which the picker offers first."""
         out = []
-        for st in self._json("/api/states"):
-            eid = st.get("entity_id", "")
-            attrs = st.get("attributes") or {}
-            domain = eid.split(".", 1)[0]
-            if not ENTITY_ID.match(eid):
+        rows = self._json("/api/states")
+        if not isinstance(rows, list):
+            raise UpstreamError("Home Assistant sent something unexpected. Check the address.")
+        for st in rows:
+            if not isinstance(st, dict):
                 continue
+            eid = st.get("entity_id")
+            attrs = st.get("attributes") if isinstance(st.get("attributes"), dict) else {}
+            if not isinstance(eid, str) or not ENTITY_ID.match(eid):
+                continue
+            domain = eid.split(".", 1)[0]
             kind = "camera" if domain == "camera" else ha_kind(eid, attrs)
             if kind == "other":
                 continue
@@ -1595,9 +1654,7 @@ class HomeAssistant:
         if hit and time.time() - hit[0] < 1.0:
             return hit[1], hit[2]
         path = f"/api/camera_proxy/{camera_id}" + (f"?width={width}&height={round(width * 9 / 16)}" if width else "")
-        blob = self._get(path, timeout=10)
-        if len(blob) > 8_000_000:
-            raise UpstreamError("The camera's picture is too large")
+        blob = self._get(path, timeout=10, max_bytes=8_000_000)
         ctype = "image/png" if blob[:4] == b"\x89PNG" else "image/jpeg"
         with self.lock:
             self.snaps[key] = (time.time(), blob, ctype)
@@ -1953,6 +2010,7 @@ def is_loopback(ip: str) -> bool:
 def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
         server_version = "FamilyDashboard/2.0"
+        timeout = 30            # a client that stops talking is let go, so it can't hold a thread for ever
 
         def log_message(self, fmt, *args):
             log.debug("%s - %s", self.address_string(), fmt % args)
@@ -2010,7 +2068,7 @@ def make_handler(app: App):
 
         def body(self) -> Any:
             n = int(self.headers.get("Content-Length") or 0)
-            if n > 256_000:
+            if n < 0 or n > 256_000:
                 raise ValueError("Request too large")
             try:
                 return json.loads(self.rfile.read(n) or b"{}")
@@ -2019,10 +2077,34 @@ def make_handler(app: App):
 
         # --- routing
 
+        def _guarded(self, work):
+            try:
+                work()
+            except (BrokenPipeError, ConnectionResetError, TimeoutError):
+                pass                                        # the other end went away
+            except OSError as e:
+                log.error("Disk problem handling %s: %s", self.path.split("?")[0], e)
+                try:
+                    self._json(500, {"error": f"The server couldn't write to its data folder ({e.strerror or 'disk error'}). Nothing was changed."})
+                except Exception:  # noqa: BLE001
+                    pass
+            except Exception:  # noqa: BLE001 — never leave a browser or the TV without an answer
+                log.exception("Unexpected error handling %s %s", self.command, self.path.split("?")[0])
+                try:
+                    self._json(500, {"error": "Something went wrong on the server. It has been logged."})
+                except Exception:  # noqa: BLE001
+                    pass
+
         def do_HEAD(self):
             self.do_GET()
 
         def do_GET(self):
+            self._guarded(self._get)
+
+        def do_POST(self):
+            self._guarded(self._post)
+
+        def _get(self):
             url = urllib.parse.urlsplit(self.path)
             path, q = url.path, urllib.parse.parse_qs(url.query)
 
@@ -2040,7 +2122,7 @@ def make_handler(app: App):
                 return self.api_get(path, q)
             return self.static(path)
 
-        def do_POST(self):
+        def _post(self):
             url = urllib.parse.urlsplit(self.path)
             path = url.path
             if not path.startswith("/admin/api/") and path != "/api/tv/pair":
@@ -2252,6 +2334,8 @@ def make_handler(app: App):
 
         def static(self, path: str):
             rel = urllib.parse.unquote(path).lstrip("/") or "index.html"
+            if "\x00" in rel:
+                return self._json(404, {"error": "Not found"})
             target = (app.web_root / rel).resolve()
             if app.web_root not in target.parents and target != app.web_root:
                 return self._json(403, {"error": "Forbidden"})

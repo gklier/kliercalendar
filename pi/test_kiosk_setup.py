@@ -62,6 +62,31 @@ class KioskSetupTest(unittest.TestCase):
         out = subprocess.run(["bash", str(self.base / "pi/kiosk.sh"), "--print-url"], capture_output=True, text=True, check=True).stdout
         self.assertIn("Waiting for the family dashboard server", out)
 
+    def test_a_captive_portal_is_not_believed(self):
+        """A 200 answer that isn't a dashboard page (a hotel login page, a proxy error) leaves the TV on the waiting page."""
+        self.assertEqual(ks.display(self.base, "chromium-browser"), 0)
+        (self.base / "pi/kiosk.sh").write_bytes((Path(ks.__file__).parent / "kiosk.sh").read_bytes())
+        answers = {"text": "<html><body>Please log in to the guest Wi-Fi</body></html>\n"}
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+            def do_GET(self):
+                body = answers["text"].encode()
+                self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            self.assertEqual(ks.configure(self.base, f"http://127.0.0.1:{srv.server_port}", "k" * 32), 0)
+            url = lambda: subprocess.run(["bash", str(self.base / "pi/kiosk.sh"), "--print-url"], capture_output=True, text=True, check=True).stdout
+            for bad in (answers["text"], "https://evil.example/login\n0\nawake\n", "javascript:alert(1)\n", "\n", "/ has spaces\n"):
+                answers["text"] = bad
+                self.assertIn("Waiting for the family dashboard server", url(), bad)
+            answers["text"] = "http://localhost:8080/?mode=live\n0\nawake\n"           # what a Pi with its own server answers
+            self.assertIn("localhost:8080/?mode=live", url())
+        finally:
+            srv.shutdown()
+
     def test_display_only_lite(self):
         """Raspberry Pi OS Lite: the launcher runs under cage."""
         self.assertEqual(ks.display(self.base, "chromium-browser"), 0)

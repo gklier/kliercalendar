@@ -384,7 +384,7 @@ body.has-ticker .ticker { display: flex; }
 /* ---------- Home Assistant: status tiles, camera tile, motion pop-up ---------- */
 
 /* Both stay out of the built-in arrangement; the layout turns them on */
-.home { display: none; flex-wrap: wrap; align-content: center; align-items: center; gap: 8px 10px; padding: 8px 16px; overflow: hidden; border-radius: 30px; }
+.home { display: none; flex-wrap: nowrap; align-items: center; gap: 10px; padding: 8px 16px; overflow: hidden; border-radius: 30px; }   /* one row, always: renderHome drops what doesn't fit */
 .camera { display: none; position: relative; overflow: hidden; padding: 0; background: #000; }
 .camwall { display: none; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; padding: 4px; overflow: hidden; background: #000; }
 .wall-cell { position: relative; overflow: hidden; border-radius: 10px; background: #111; min-height: 0; }
@@ -397,9 +397,12 @@ body.has-ticker .ticker { display: flex; }
 .camera img { object-fit: cover; }
 .camera img.broken, .cam-popup img.broken { opacity: 0.35; }
 .cam-name, .pop-name { position: absolute; left: 12px; bottom: 10px; padding: 3px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.55); color: #FFFFFF; font-size: 16px; font-weight: 650; }
-.hsum { display: flex; align-items: center; gap: 8px; padding-right: 10px; font-size: 19px; font-weight: 700; }
-.hs { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 10px; border-radius: 999px; background: var(--well); font-size: 16px; white-space: nowrap; }
+.hsum { flex: none; display: flex; align-items: center; gap: 8px; padding-right: 10px; font-size: 19px; font-weight: 700; }
+.hsum .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hsum .hi { flex: none; }
+.hs { flex: none; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 10px; border-radius: 999px; background: var(--well); font-size: 16px; white-space: nowrap; }
 .hs b { font-weight: 650; }
+.hs.more { background: transparent; color: var(--ink-2); font-weight: 650; padding-left: 4px; }
 .hs span { font-weight: 650; }
 .hs.good span, .hsum.good { color: var(--green); }
 .hs.warn span, .hsum.warn { color: var(--yellow); }
