@@ -145,10 +145,13 @@
       page.innerHTML = `
         <h1>Layout</h1>
         <p class="lede">Move and resize anything on the TV. Drag a box to move it, drag its edges or corners to resize it, or use the arrow keys (hold Shift to resize). Everything snaps to a 10-pixel grid.</p>
+        <div class="lay-stage" id="stage">
+        <button type="button" class="secondary lay-full" id="lay-full" aria-label="Fullscreen" title="Fullscreen (Esc to leave)">⤢ Fullscreen</button>
         <div class="lay-canvas" id="canvas" tabindex="0" aria-label="Layout editor. Arrow keys move the selected widget; Shift with arrow keys resizes it.">
           <iframe id="lay-frame" title="Live preview of the TV" tabindex="-1" src="/?mode=${sample ? "demo" : "live"}"></iframe>
           <div class="lay-grid" aria-hidden="true"></div>
           ${widgets.map((w) => `<div class="lay-box" data-type="${w.type}"><span class="lay-name">${NAMES[w.type]}</span>${["n", "s", "e", "w", "ne", "nw", "se", "sw"].map((d) => `<i class="hd ${d}" data-h="${d}"></i>`).join("")}</div>`).join("")}
+        </div>
         </div>
         <div class="inline" style="margin:10px 2px 0">
           <label class="show"><input type="checkbox" id="sample" ${sample ? "checked" : ""}> Show sample data in the preview</label>
@@ -172,6 +175,23 @@
       $("#lay-frame").addEventListener("load", post);
       $("#sample").onchange = (e) => { sample = e.target.checked; $("#lay-frame").src = `/?mode=${sample ? "demo" : "live"}`; };
       addEventListener("resize", paint);
+
+      // Fullscreen: the browser's own if there is one (not on an iPhone), else the stage fills the window
+      const stage = $("#stage"), fullBtn = $("#lay-full");
+      const isFull = () => document.fullscreenElement === stage || stage.classList.contains("pseudo");
+      const showFull = () => { if (!stage.isConnected) return; fullBtn.textContent = isFull() ? "✕ Leave fullscreen" : "⤢ Fullscreen"; paint(); };
+      fullBtn.onclick = async () => {
+        if (isFull()) {
+          if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+          stage.classList.remove("pseudo");
+        } else if (stage.requestFullscreen) {
+          try { await stage.requestFullscreen(); } catch (_) { stage.classList.add("pseudo"); }
+        } else stage.classList.add("pseudo");
+        showFull();
+        cv.focus();
+      };
+      document.addEventListener("fullscreenchange", showFull);
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape" && stage.classList.contains("pseudo")) { stage.classList.remove("pseudo"); showFull(); } });
       $("#wlist").onclick = (e) => { const t = e.target.dataset && e.target.dataset.type; if (t) select(t); };
 
       cv.addEventListener("pointerdown", (e) => {

@@ -300,6 +300,12 @@ input[type="range"] { accent-color: var(--accent); }
 
 /* ---------- Layout editor ---------- */
 
+.lay-stage { position: relative; }
+.lay-full { position: absolute; right: 14px; top: 14px; z-index: 5; padding: 6px 12px; font-size: 13px; opacity: 0.85; }
+.lay-full:hover, .lay-full:focus-visible { opacity: 1; }
+.lay-stage:fullscreen, .lay-stage.pseudo { display: grid; place-items: center; background: #000; }
+.lay-stage.pseudo { position: fixed; inset: 0; z-index: 1000; }
+.lay-stage:fullscreen .lay-canvas, .lay-stage.pseudo .lay-canvas { width: min(100vw, calc(100vh * 16 / 9)); border: 0; border-radius: 0; }
 .lay-canvas { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #0B1626; border: 6px solid #1C1C1E; touch-action: none; user-select: none; }
 .lay-canvas:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
 .lay-canvas iframe { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; border: 0; transform-origin: 0 0; pointer-events: none; }
