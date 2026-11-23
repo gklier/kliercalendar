@@ -55,7 +55,12 @@
 
   FD.pages.layout = function (page) {
     const { $, $$, esc, api, toast } = FD;
-    const saved = FD.settings.layout && FD.settings.layout.widgets;
+    // Which screen is being edited: "" is the shared layout, otherwise one TV key's own layout
+    const devices = FD.settings.tv.devices || [];
+    const device = devices.find((d) => d.id === FD.layoutTarget) || null;
+    if (!device) FD.layoutTarget = "";
+    const ownLayout = device && device.layout && device.layout.widgets;
+    const saved = ownLayout || (FD.settings.layout && FD.settings.layout.widgets);   // a screen without its own starts from the shared one
     const tickerOn = !!(FD.settings.stocks.enabled && FD.settings.stocks.symbols.length);
     // Any widget missing from a saved layout starts at its built-in place, hidden
     const base = builtIn(tickerOn);
@@ -144,6 +149,15 @@
     function draw() {
       page.innerHTML = `
         <h1>Layout</h1>
+        ${devices.length ? `<div class="group"><div class="item" style="grid-template-columns:1fr">
+          <label class="tfield">Editing the layout for
+            <select id="lay-target">
+              <option value="">Every screen (shared layout)</option>
+              ${devices.map((d) => `<option value="${esc(d.id)}" ${device && d.id === device.id ? "selected" : ""}>${esc(d.name)}${d.layout ? " (own layout)" : ""}</option>`).join("")}
+            </select></label>
+          <span class="sub">${device ? (ownLayout ? `${esc(device.name)} has its own layout. Changes here affect only that screen.` : `${esc(device.name)} follows the shared layout. Saving here gives it a layout of its own.`)
+            : "Screens without a layout of their own show this one, including the Pi on the server itself."}</span>
+        </div></div>` : ""}
         <p class="lede">Move and resize anything on the TV. Drag a box to move it, drag its edges or corners to resize it, or use the arrow keys (hold Shift to resize). Everything snaps to a 10-pixel grid.</p>
         <div class="lay-stage" id="stage">
         <button type="button" class="secondary lay-full" id="lay-full" aria-label="Fullscreen" title="Fullscreen (Esc to leave)">⤢ Fullscreen</button>
@@ -155,7 +169,7 @@
         </div>
         <div class="inline" style="margin:10px 2px 0">
           <label class="show"><input type="checkbox" id="sample" ${sample ? "checked" : ""}> Show sample data in the preview</label>
-          <span class="msg" id="lay-state" role="status">${FD.settings.layout ? "Saved layout" : "The built-in arrangement"}</span>
+          <span class="msg" id="lay-state" role="status">${device ? (ownLayout ? "Saved layout for this screen" : "Using the shared layout") : FD.settings.layout ? "Saved layout" : "The built-in arrangement"}</span>
         </div>
 
         <h2>Widgets</h2>
@@ -164,7 +178,7 @@
 
         <div class="savebar sticky">
           <button class="primary" id="lay-save" type="button">Save layout</button>
-          <button class="secondary" id="lay-reset" type="button">Back to the built-in arrangement</button>
+          <button class="secondary" id="lay-reset" type="button">${device ? "Use the shared layout again" : "Back to the built-in arrangement"}</button>
           <span class="msg" id="lay-msg" role="status"></span>
         </div>`;
       bind(); paint(); drawList(); inspector();
@@ -173,6 +187,12 @@
     function bind() {
       const cv = $("#canvas");
       $("#lay-frame").addEventListener("load", post);
+      const target = $("#lay-target");
+      if (target) target.onchange = () => {
+        if (dirty && !confirm("Switch screens? Changes you haven't saved will be lost.")) { target.value = FD.layoutTarget; return; }
+        FD.layoutTarget = target.value;
+        FD.rerender();
+      };
       $("#sample").onchange = (e) => { sample = e.target.checked; $("#lay-frame").src = `/?mode=${sample ? "demo" : "live"}`; };
       addEventListener("resize", paint);
 
@@ -235,18 +255,19 @@
       $("#lay-save").onclick = async () => {
         const msg = $("#lay-msg"); msg.className = "msg"; msg.textContent = "Saving…";
         try {
-          const res = await api("settings", { layout: current() });
+          const res = device ? await api("tv/layout", { id: device.id, layout: current() }) : await api("settings", { layout: current() });
           FD.settings = res.settings; dirty = false;
-          msg.textContent = ""; $("#lay-state").textContent = "Saved layout";
+          msg.textContent = ""; $("#lay-state").textContent = device ? "Saved layout for this screen" : "Saved layout";
           toast("Saved. The TV updates within a minute.");
+          if (device && !ownLayout) FD.rerender();           // the screen now has its own layout: refresh the labels
         } catch (err) { msg.className = "msg bad"; msg.textContent = err.message; }
       };
       $("#lay-reset").onclick = async () => {
-        if (!confirm("Go back to the built-in arrangement? Your own layout will be lost.")) return;
+        if (!confirm(device ? `Make ${device.name} follow the shared layout again? Its own layout will be lost.` : "Go back to the built-in arrangement? Your own layout will be lost.")) return;
         try {
-          const res = await api("settings", { layout: null });
+          const res = device ? await api("tv/layout", { id: device.id, layout: null }) : await api("settings", { layout: null });
           FD.settings = res.settings;
-          toast("Back to the built-in arrangement.");
+          toast(device ? `${device.name} follows the shared layout again.` : "Back to the built-in arrangement.");
           FD.rerender();
         } catch (err) { toast(err.message); }
       };

@@ -937,6 +937,36 @@ class OffsiteTest(unittest.TestCase):
         self.assertEqual(c2.call("/api/config")[0], 401)
         self.assertEqual(c.call("/api/config")[0], 200)
 
+    def test_each_screen_can_have_its_own_layout(self):
+        shared = {"version": 1, "widgets": [{"type": "clock", "x": 0, "y": 0, "w": 300, "h": 100}]}
+        mine = {"version": 1, "widgets": [{"type": "clock", "x": 500, "y": 40, "w": 400, "h": 120}]}
+        self.app.save(server.apply_settings(self.app.config, {"layout": shared}))
+        a, b = self.app.new_tv_key("Pi"), self.app.new_tv_key("Fire TV")
+        ids = {d["name"]: d["id"] for d in server.public_settings(self.app.config)["tv"]["devices"]}
+
+        def layout(key):
+            return self.app.display_config(key)["layout"]["widgets"][0]["x"]
+        self.assertEqual((layout(a), layout(b), layout(None)), (0, 0, 0))     # everyone follows the shared layout
+        self.app.set_tv_layout(ids["Fire TV"], mine)
+        self.assertEqual((layout(a), layout(b), layout(None)), (0, 500, 0))   # only the Fire TV changes
+        s, body = self.get("/api/config", {"Authorization": f"Bearer {b}"})   # and it is what that screen is sent
+        self.assertEqual(json.loads(body)["layout"]["widgets"][0]["x"], 500)
+        with self.assertRaises(ValueError):
+            self.app.set_tv_layout(ids["Fire TV"], {"widgets": [{"type": "clock", "x": 1900, "y": 0, "w": 400, "h": 100}]})
+        with self.assertRaises(ValueError):
+            self.app.set_tv_layout("nobody", mine)
+        self.app.set_tv_layout(ids["Fire TV"], None)                          # back to following the shared one
+        self.assertEqual(layout(b), 0)
+
+    def test_first_key_becomes_an_ordinary_screen(self):
+        cfg = server.deep_merge(server.DEFAULT_CONFIG, {"tv": {"key_hash": server.key_hash("old-key-old-key-old-key")}})
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "old.json"
+            path.write_text(json.dumps(cfg))
+            store = server.Store(path)
+        self.assertEqual(store.data["tv"]["key_hash"], "")
+        self.assertEqual([d["id"] for d in store.data["tv"]["devices"]], ["first"])
+
     def test_lockout_uses_forwarded_address(self):
         self.app.new_tv_key()
         for i in range(5):

@@ -204,6 +204,12 @@ class Store:
         if not isinstance(raw, dict):
             sys.exit(f"Settings file should hold a JSON object ({source}), not {type(raw).__name__}")
         self.data = deep_merge(DEFAULT_CONFIG, self._well_shaped(DEFAULT_CONFIG, raw))
+        tv = self.data["tv"]
+        if tv["key_hash"]:
+            if not any(isinstance(d, dict) and d.get("hash") == tv["key_hash"] for d in tv["devices"]):
+                tv["devices"].insert(0, {"id": "first", "name": "First TV key", "hash": tv["key_hash"], "made": ""})
+            tv["key_hash"] = ""
+        tv["devices"] = [d for d in tv["devices"] if isinstance(d, dict) and isinstance(d.get("id"), str) and isinstance(d.get("hash"), str)]
         for cal in self.data["calendar"]["calendars"]:
             cal.setdefault("id", secrets.token_hex(4))
             cal.setdefault("enabled", True)
@@ -683,9 +689,8 @@ def public_settings(c: dict) -> dict:
     """Settings as the admin page sees them: everything except secrets."""
     out = copy.deepcopy(c)
     out.pop("admin", None)
-    devices = [{"id": d["id"], "name": d["name"], "made": d.get("made", "")} for d in c["tv"].get("devices", []) if isinstance(d, dict)]
-    if c["tv"]["key_hash"]:                 # the one key made before there could be several
-        devices.insert(0, {"id": "first", "name": "First TV key", "made": ""})
+    devices = [{"id": d["id"], "name": str(d.get("name", "TV")), "made": d.get("made", ""), "layout": d.get("layout")}
+               for d in c["tv"].get("devices", []) if isinstance(d, dict)]
     out["tv"] = {"key": {"set": bool(devices), "hint": ""}, "devices": devices}
     out["tempest"]["token"] = mask(c["tempest"]["token"])
     out["drive"]["api_key"] = mask(c["drive"]["api_key"])
@@ -1772,12 +1777,37 @@ class App:
                     tar.add(f, arcname=f"data/{f.relative_to(root)}")
         return buf.getvalue()
 
-    def display_config(self) -> dict:
+    def device_for(self, key: str | None) -> dict | None:
+        if not key or not isinstance(key, str):
+            return None
+        mine = key_hash(key)
+        for d in self.config["tv"].get("devices", []):
+            if isinstance(d, dict) and d.get("hash") and hmac.compare_digest(mine, d["hash"]):
+                return d
+        return None
+
+    def set_tv_layout(self, device_id: str, layout: Any) -> None:
+        """Give one screen its own layout (None: it follows the shared one again)."""
+        checked = _layout(layout)
+        new = copy.deepcopy(self.config)
+        for d in new["tv"]["devices"]:
+            if isinstance(d, dict) and d.get("id") == device_id:
+                if checked is None:
+                    d.pop("layout", None)
+                else:
+                    d["layout"] = checked
+                break
+        else:
+            raise ValueError("No screen has that key")
+        self.save(new)
+
+    def display_config(self, key: str | None = None) -> dict:
         c = self.config
+        own = (self.device_for(key) or {}).get("layout")      # a screen with its own layout gets that one
         return {**c["display"], "units": {"temp": c["tempest"]["units"]["temp"].upper(),
                                           "wind": c["tempest"]["units"]["wind"],
                                           "precip": c["tempest"]["units"]["precip"]},
-                "home": c["home"]["label"], "version": self.store.version, "layout": c["layout"],
+                "home": c["home"]["label"], "version": self.store.version, "layout": own or c["layout"],
                 "ha": {"status": bool(c["ha"]["enabled"] and c["ha"]["entities"]),
                        "cameras": bool(c["ha"]["enabled"] and c["ha"]["cameras"]),
                        "popup": bool(c["ha"]["popup"]["enabled"])},
@@ -2188,7 +2218,8 @@ def make_handler(app: App):
                 return self._send(200, blob, ctype)
             name = path[5:]
             if name == "config":
-                return self._json(200, app.display_config())
+                auth = self.headers.get("Authorization") or ""
+                return self._json(200, app.display_config(auth[7:].strip() if auth.startswith("Bearer ") else self._cookie("fd_tv")))
             if name == "version":
                 f = (q.get("fps") or [""])[0]
                 if f.isdigit() and self.tv():
@@ -2318,6 +2349,9 @@ def make_handler(app: App):
                 # Shown once; only its hash is kept
                 return self._json(200, {"key": app.new_tv_key(data.get("name") or "TV"), "name": " ".join(str(data.get("name") or "TV").split())[:40],
                                         "settings": public_settings(app.config)})
+            if name == "tv/layout":
+                app.set_tv_layout(str(data.get("id", "")), data.get("layout"))
+                return self._json(200, {"settings": public_settings(app.config)})
             if name == "tv/revoke":
                 app.revoke_tv_key(str(data.get("id", "")))
                 return self._json(200, {"settings": public_settings(app.config)})
