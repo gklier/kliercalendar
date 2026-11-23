@@ -664,7 +664,7 @@
       if (!cam) return;
       cell.querySelector(".cam-name").textContent = cam.name;
       cell.classList.toggle("moving", !!cam.active);
-      showPicture(cell.querySelector("img"), cam.id, null, 480);
+      showPicture(cell.querySelector("img"), cam.id, null, Math.min(1280, Math.max(480, Math.ceil(cell.offsetWidth / 160) * 160)));   // a big wall asks for sharper pictures
     });
   }
 

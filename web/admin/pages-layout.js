@@ -26,6 +26,28 @@
     ];
   }
 
+  // Ready-made arrangements to start from. They only move boxes; nothing reaches a TV until Save.
+  function cameraFocused(base, s) {
+    const cams = (s.ha.cameras || []).slice(0, 4).map((c) => c.id);
+    const homeOn = !!(s.ha.enabled && (s.ha.entities || []).length);
+    const place = {
+      clock: [32, 30, 300, 130], weather: [352, 30, 560, 130], drive: [932, 30, 956, 130],
+      home: [32, 180, 1100, 64], camwall: [32, homeOn ? 260 : 180, 1100, homeOn ? 720 : 800],
+      calendar: [1152, 180, 736, 520], focus: [1152, 720, 736, 260], ticker: [32, 1000, 1856, 64],
+    };
+    return base.map((b) => {
+      const w = { ...b, options: b.options ? { ...b.options } : undefined };
+      const at = place[b.type];
+      if (at) Object.assign(w, { x: at[0], y: at[1], w: at[2], h: at[3], visible: true });
+      if (b.type === "home") w.visible = homeOn;
+      if (b.type === "camera") w.visible = false;                           // the wall replaces the single tile
+      if (b.type === "camwall") w.options = { cameras: cams };
+      if (b.type === "calendar") w.options = { days: 7 };
+      if (!w.options) delete w.options;
+      return w;
+    });
+  }
+
   // Used by the Smart home page: switch a widget on in the saved layout, making room for it
   FD.addWidget = async function (type) {
     const s = FD.settings, saved = s.layout && s.layout.widgets;
@@ -172,6 +194,15 @@
           <span class="msg" id="lay-state" role="status">${device ? (ownLayout ? "Saved layout for this screen" : "Using the shared layout") : FD.settings.layout ? "Saved layout" : "The built-in arrangement"}</span>
         </div>
 
+        <div class="inline" style="margin:18px 2px 0">
+          <label class="tfield">Start from a ready-made arrangement
+            <select id="lay-preset">
+              <option value="">Choose…</option>
+              <option value="cameras">Cameras first (big 4-camera wall, calendar and stocks beside it)</option>
+              <option value="builtin">The built-in arrangement</option>
+            </select></label>
+          <span class="sub">It only moves the boxes. Nothing changes on a TV until you press Save.</span>
+        </div>
         <h2>Widgets</h2>
         <div id="wlist" class="wlist"></div>
         <div class="group" style="margin-top:10px"><div class="item" style="grid-template-columns:1fr" id="inspector"></div></div>
@@ -187,6 +218,15 @@
     function bind() {
       const cv = $("#canvas");
       $("#lay-frame").addEventListener("load", post);
+      $("#lay-preset").onchange = (e) => {
+        const kind = e.target.value; e.target.value = "";
+        if (!kind) return;
+        if (dirty && !confirm("Replace the arrangement you're working on? Changes you haven't saved will be lost.")) return;
+        const next = kind === "cameras" ? cameraFocused(builtIn(tickerOn), FD.settings) : builtIn(tickerOn);
+        next.forEach((n) => { const w = get(n.type); if (!w) return; for (const k of ["x", "y", "w", "h", "visible", "scale"]) w[k] = n[k]; if (n.options) w.options = n.options; else delete w.options; });
+        if (kind === "builtin") widgets.forEach((w) => { if (["home", "camera", "camwall"].includes(w.type)) w.visible = false; });
+        changed(); drawList(); inspector();
+      };
       const target = $("#lay-target");
       if (target) target.onchange = () => {
         if (dirty && !confirm("Switch screens? Changes you haven't saved will be lost.")) { target.value = FD.layoutTarget; return; }
