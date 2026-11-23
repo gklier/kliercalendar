@@ -2316,7 +2316,8 @@ def make_handler(app: App):
                 return self._json(200, app.set_sleep_override(str(data.get("mode", "")), data.get("hours", 2)))
             if name == "tv/key":
                 # Shown once; only its hash is kept
-                return self._json(200, {"key": app.new_tv_key(data.get("name") or "TV"), "settings": public_settings(app.config)})
+                return self._json(200, {"key": app.new_tv_key(data.get("name") or "TV"), "name": " ".join(str(data.get("name") or "TV").split())[:40],
+                                        "settings": public_settings(app.config)})
             if name == "tv/revoke":
                 app.revoke_tv_key(str(data.get("id", "")))
                 return self._json(200, {"settings": public_settings(app.config)})

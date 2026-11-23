@@ -56,7 +56,6 @@ sudo reboot</code></pre></li>
       <div class="group"><div class="item" style="grid-template-columns:1fr">
         <div class="inline"><button class="secondary" type="button" id="mk-key">Make a TV key</button>
           <span class="state">${FD.settings.tv.key.set ? "Keys exist. Making another one doesn't stop the others." : "No key yet."}</span></div>
-        <div id="key-out"></div>
         <span class="sub" style="grid-column:1">The key is shown once and only a fingerprint of it is stored.</span>
       </div></div>
 
@@ -68,11 +67,9 @@ sudo reboot</code></pre></li>
 
     $("#mk-key").onclick = async () => {
       try {
-        const res = await api("tv/key", {});
+        const res = await api("tv/key", { name: "Raspberry Pi" });
         FD.settings = res.settings;
-        $("#key-out").innerHTML = `<p class="sub" style="margin-top:10px">Copy it now; it won't be shown again:</p>
-<pre><code>sudo DASHBOARD_SERVER=${esc(location.origin)} DASHBOARD_TV_KEY=${esc(res.key)} ./pi/install-display.sh</code></pre>
-          <p class="sub">If this page was opened by a name or address the TV can't reach, use the server's own address instead.</p>`;
+        FD.keyDialog(res.name || "the Pi", res.key);
       } catch (err) { toast(err.message); }
     };
   };

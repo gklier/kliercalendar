@@ -42,6 +42,51 @@
     toast.timer = setTimeout(() => t.classList.remove("show"), 3200);
   }
 
+  // A pop-up that holds a new TV key until it is closed. The key is shown once, so it stays until the person says so.
+  function keyDialog(name, key) {
+    const server = location.origin;
+    const items = [
+      ["Fire TV, tablet or any browser", "Open this address on the screen, then leave it up.", `${server}/tv#k=${key}`],
+      ["Raspberry Pi", "Run this on the Pi.", `cd ~/family-dashboard && sudo DASHBOARD_SERVER=${server} DASHBOARD_TV_KEY=${key} ./pi/install-display.sh`],
+      ["The key alone", "For anything else.", key],
+    ];
+    const dlg = document.createElement("dialog");
+    dlg.className = "keydlg";
+    dlg.setAttribute("aria-labelledby", "keydlg-h");
+    dlg.innerHTML = `<h2 id="keydlg-h">TV key for ${esc(name)}</h2>
+      <p class="hint" style="margin-left:0">Copy what you need now. For safety the key is shown only this once, and closing this window can't bring it back.</p>
+      ${items.map(([title, note, text], i) => `<div class="keyrow"><b>${esc(title)}</b><span class="sub">${esc(note)}</span>
+        <pre><code>${esc(text)}</code></pre>
+        <button class="secondary" type="button" data-copy="${i}">Copy</button></div>`).join("")}
+      <p class="hint" style="margin-left:0">If this page was opened by a name or address the screen can't reach, use the server's own address instead.</p>
+      <div class="savebar"><button type="button" id="keydlg-close">Done, I've copied it</button></div>`;
+    document.body.appendChild(dlg);
+    const copy = async (text) => {
+      try {
+        if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); return true; }
+      } catch (e) { /* fall through */ }
+      const t = document.createElement("textarea");        // plain http on the home network has no clipboard API
+      t.value = text;
+      t.style.cssText = "position:fixed;opacity:0";
+      dlg.appendChild(t);
+      t.select();
+      let ok = false;
+      try { ok = document.execCommand("copy"); } catch (e) { /* ignore */ }
+      t.remove();
+      return ok;
+    };
+    dlg.querySelectorAll("[data-copy]").forEach((b) => b.onclick = async () => {
+      const ok = await copy(items[+b.dataset.copy][2]);
+      b.textContent = ok ? "Copied" : "Press and hold to select it above";
+      setTimeout(() => { b.textContent = "Copy"; }, 2500);
+    });
+    const close = () => { dlg.close(); dlg.remove(); };
+    dlg.querySelector("#keydlg-close").onclick = close;
+    dlg.addEventListener("cancel", (e) => { e.preventDefault(); });     // Escape does not close it by accident
+    dlg.showModal();
+    dlg.querySelector("[data-copy]").focus();
+  }
+
   function ago(sec) {
     if (!sec) return "not yet";
     const m = Math.round((Date.now() / 1000 - sec) / 60);
@@ -230,7 +275,7 @@
         <div class="item"><span class="label">Add a screen</span>
           <div class="inline"><input type="text" id="tvname" maxlength="40" placeholder="Name, such as Fire TV" aria-label="Name for the new screen">
           <button class="secondary" type="button" id="tvkey">Make a TV key</button></div>
-          <div id="tvkey-out"></div></div>
+          </div>
       </div>
       </div>`;
 
@@ -264,14 +309,7 @@
         settings = res.settings;
         drawKeys();
         $("#tvname").value = "";
-        const server = location.origin;
-        $("#tvkey-out").innerHTML = `
-          <p class="sub" style="margin-top:10px">Copy it now; it's shown only once.</p>
-          <p class="sub"><b>Fire TV, tablet or any browser:</b> open this address on the screen, then leave it up.</p>
-          <pre><code>${esc(server)}/tv#k=${esc(res.key)}</code></pre>
-          <p class="sub"><b>A Raspberry Pi:</b> run this on it.</p>
-          <pre><code>cd ~/family-dashboard && sudo DASHBOARD_SERVER=${esc(server)} DASHBOARD_TV_KEY=${esc(res.key)} ./pi/install-display.sh</code></pre>
-          <p class="sub">Use the off-site server's https:// address if this page isn't open on it.</p>`;
+        keyDialog(res.name || "this screen", res.key);
       } catch (err) {
         toast(err.message);
       }
@@ -663,7 +701,7 @@
     settings: { get: () => settings, set: (v) => { settings = v; } },
     status: { get: () => status, set: (v) => { status = v; } },
   });
-  Object.assign(FD, { $, $$, esc, api, toast, ago, bindSave, saveBar, runTest, secretPlaceholder, rerender: () => route(), isExpert });
+  Object.assign(FD, { $, $$, esc, api, toast, keyDialog, ago, bindSave, saveBar, runTest, secretPlaceholder, rerender: () => route(), isExpert });
 
 
   api("session").then((s) => (s.signedIn ? start() : showGate())).catch(() => showGate());

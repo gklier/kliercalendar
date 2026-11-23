@@ -343,3 +343,10 @@ input[type="range"] { accent-color: var(--accent); }
   .ha-cam { grid-template-columns: 1fr auto; }
   .ha-thumb { display: none; }
 }
+
+.keydlg { border: 1px solid var(--line, rgba(128,128,128,.35)); border-radius: 16px; background: var(--bg); color: var(--ink); padding: 22px 24px; width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.keydlg::backdrop { background: rgba(0, 0, 0, 0.55); }
+.keydlg h2 { margin-top: 0; }
+.keyrow { display: grid; gap: 6px; margin: 14px 0; }
+.keyrow pre { margin: 0; white-space: pre-wrap; word-break: break-all; user-select: all; }
+.keyrow button { justify-self: start; }
