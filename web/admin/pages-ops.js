@@ -51,8 +51,7 @@ sudo chown -R 1000:1000 /path/to/data</code></pre>
 cd kliercalendar</code></pre></li>
         <li><b>Make a TV key</b> (below) and run the installer with it. It sets up the full-screen browser, the 1080p video mode and the sleep behaviour:
 <pre><code>sudo DASHBOARD_SERVER=${esc(location.origin)} DASHBOARD_TV_KEY=&lt;the key&gt; ./pi/install-display.sh
-sudo reboot</code></pre>
-          If DAKboard should still be there as a fallback when the server is unreachable, also add <code>DAKBOARD_URL=&lt;its screen link&gt;</code>.</li>
+sudo reboot</code></pre></li>
       </ol>
       <div class="group"><div class="item" style="grid-template-columns:1fr">
         <div class="inline"><button class="secondary" type="button" id="mk-key">Make a TV key</button>
@@ -106,7 +105,7 @@ sudo reboot</code></pre>
         <dt>Dashboard server</dt>
         <dd>One Python process using only the standard library's HTTP server, plus two small packages for reading calendars (<code>icalendar</code>, <code>recurring-ical-events</code>). It keeps every key private, fetches and caches the data, serves the TV page and this settings site, and answers a few JSON endpoints. It normally runs in a container limited to 200 MB, as an unprivileged user, with no database: settings are one JSON file.</dd>
         <dt>The TV</dt>
-        <dd>A Raspberry Pi 4 running Raspberry Pi OS Lite. A systemd service starts <i>cage</i> (a single-window Wayland compositor) and Chromium in kiosk mode, started by a launcher script. The launcher asks the server every 5 seconds which page to show and whether the screen should be asleep, and restarts the browser or switches the screen to match. If the server can't be reached it falls back to the DAKboard link it was installed with.</dd>
+        <dd>A Raspberry Pi 4 running Raspberry Pi OS Lite. A systemd service starts <i>cage</i> (a single-window Wayland compositor) and Chromium in kiosk mode, started by a launcher script. The launcher asks the server every 5 seconds which page to show and whether the screen should be asleep, and restarts the browser or switches the screen to match. If the server can't be reached it shows a waiting page and keeps trying.</dd>
         <dt>Settings (this site)</dt>
         <dd>Served by the same process under <code>/admin/</code>. It never holds secrets: the server returns only "set or not" for every key and password.</dd>
       </dl></div>
@@ -142,7 +141,7 @@ sudo reboot</code></pre>
       <h2>How the TV is driven</h2>
       <div class="group"><dl>
         <dt>Which page</dt>
-        <dd><code>GET /api/screen-url</code> returns three lines: the page to show (DAKboard's link or the family dashboard), a counter that "Reload the TV" bumps, and <code>asleep</code> or <code>awake</code>. The launcher polls it every 5 seconds and restarts the browser when the first two change.</dd>
+        <dd><code>GET /api/screen-url</code> returns three lines: the page to show, a counter that "Reload the TV" bumps, and <code>asleep</code> or <code>awake</code>. The launcher polls it every 5 seconds and restarts the browser when the first two change.</dd>
         <dt>Screen sleep</dt>
         <dd>The Schedule page's rules are evaluated on the server in the household time zone. The launcher turns the HDMI output off or on (<code>wlr-randr</code>) and sends HDMI-CEC standby or wake (<code>cec-ctl</code>) when the answer changes, so schedule edits take effect within seconds with no visit to the Pi.</dd>
         <dt>Settings changes</dt>
@@ -158,14 +157,14 @@ sudo reboot</code></pre>
         ${row("Restart the TV", "<code>sudo systemctl restart family-tv</code> on the Pi, or <b>Reload the TV</b> on the first settings page.")}
         ${row("Update", `Rebuild the image from the repository (<a href="${esc(REPO)}">${esc(REPO.replace("https://", ""))}</a>) and recreate the container. The data folder is untouched. In Portainer, deploy the stack from the repository and use "Pull and redeploy".`)}
         ${row("Back up", "The server's data folder. See <a href=\"#backup\">Backup</a>.")}
-        ${row("Network", "Inbound: TCP " + esc(i.port || 8080) + " from the TV and browsers. Outbound HTTPS from the server to Google (Calendar and Maps), WeatherFlow and Yahoo Finance. The TV needs only the server (and DAKboard if used as a fallback).")}
+        ${row("Network", "Inbound: TCP " + esc(i.port || 8080) + " from the TV and browsers. Outbound HTTPS from the server to Google (Calendar and Maps), WeatherFlow and Yahoo Finance. The TV needs only the server.")}
       </tbody></table></div>
 
       <h2>When something looks wrong</h2>
       <div class="group"><dl>
         <dt>A calendar is missing</dt><dd>Calendars → <b>Refresh calendars</b>. Google only offers a calendar to apps when it's ticked for syncing at <a href="https://calendar.google.com/calendar/syncselect">calendar.google.com/calendar/syncselect</a>. If Google refuses the app password (it does after the account's main password changes), make a new one.</dd>
         <dt>"Offline since…" on the TV</dt><dd>The TV keeps the last good information. Open <b>On the TV → Connections</b> for the error each source reports.</dd>
-        <dt>The TV shows "Waiting for the family dashboard server"</dt><dd>The launcher can't reach the server. Check that the server is running and that the address and TV key it was installed with are still right. If DAKboard was given at install time, the TV shows it instead.</dd>
+        <dt>The TV shows "Waiting for the family dashboard server"</dt><dd>The launcher can't reach the server. Check that the server is running and that the address and TV key it was installed with are still right. Until it can, the TV shows a waiting page.</dd>
         <dt>The TV is blank at the wrong time</dt><dd>Check <b>Schedule</b>, including a manual "Sleep the screen" that is still running.</dd>
         <dt>Drive times are stale or missing</dt><dd>The monthly Maps limit may be used up (shown under Drive times and On the TV); it paces itself, so a busy morning can use that day's share.</dd>
         <dt>The animation looks choppy</dt><dd>Confirm the video output is 1080p (the installer sets it) and that the page isn't in the 4K mode.</dd>

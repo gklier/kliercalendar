@@ -191,41 +191,22 @@
   }
 
   function pageTV(page) {
-    const mode = settings.screen.mode;
     const cals = status.calendars;
     const linked = cals.filter((c) => c.ok === true).length;
     const broken = cals.filter((c) => c.ok === false).length;
     page.innerHTML = `
       <h1>On the TV</h1>
-      <p class="lede">The TV can show your DAKboard screen or the new family dashboard. Switch any time; DAKboard stays installed either way.</p>
+      <p class="lede">A live copy of what the TV shows, and a button to reload it.</p>
 
-      <div class="preview" id="preview">
-        ${mode === "dashboard" ? `<iframe src="/?mode=live" title="Preview of the family dashboard" loading="lazy"></iframe>` : `<div class="dak">The TV is showing DAKboard.<br>Switch below to show the family dashboard.</div>`}
-      </div>
-      <p class="caption">${mode === "dashboard" ? "A live copy of what the TV shows." : `<a href="/?mode=live" target="_blank" rel="noopener">Open the family dashboard in a new tab</a> to look before you switch.`}</p>
+      <div class="preview" id="preview"><iframe src="/?mode=live" title="Preview of the family dashboard" loading="lazy"></iframe></div>
+      <p class="caption">A live copy of what the TV shows.</p>
 
-      <fieldset class="switch" aria-label="What the TV shows">
-        <label><input type="radio" name="mode" value="dakboard" ${mode === "dakboard" ? "checked" : ""}><span>DAKboard</span></label>
-        <label><input type="radio" name="mode" value="dashboard" ${mode === "dashboard" ? "checked" : ""}><span>Family dashboard</span></label>
-      </fieldset>
       <p class="hint" id="sleep-line">${FD.sleepLine ? FD.sleepLine() : ""}</p>
       <p class="hint" id="switch-note">${status.screen.kiosk
-        ? "Switching restarts the TV's browser. It takes about 15 seconds."
-        : "The TV launcher isn't running yet, so the TV won't change until the installer has been run on the Pi. Your choice is saved."}</p>
+        ? "Reloading restarts the TV's browser. It takes about 15 seconds."
+        : "The TV launcher isn't running yet, so the TV won't change until it has been installed on the Pi."}</p>
 
       <div class="expert-only">
-      <h2>DAKboard</h2>
-      <form id="dak-form">
-        <div class="group">
-          <div class="item">
-            <label for="dak">Screen link</label>
-            <input id="dak" type="text" inputmode="url" autocomplete="off" placeholder="${esc(secretPlaceholder(settings.screen.dakboard_url, "https://dakboard.com/screen/…"))}">
-            <span class="sub">The installer copies this from the Pi. Change it only if you make a new DAKboard screen.</span>
-          </div>
-        </div>
-        ${saveBar("Save link")}
-      </form>
-
       <h2>Connections</h2>
       <div class="group">
         <div class="item"><span class="label">Weather</span>${sourceState("weather", "Tempest")}</div>
@@ -257,24 +238,6 @@
     fitFrame();
     addEventListener("resize", fitFrame);
 
-    $$("input[name=mode]", page).forEach((r) => r.onchange = async () => {
-      const next = r.value;
-      try {
-        const res = await api("settings", { screen: { mode: next } });
-        settings = res.settings;
-        const restarted = res.screen && res.screen.restarted;
-        toast(next === "dashboard"
-          ? (restarted ? "Switching the TV to the family dashboard." : "Saved. The TV will show the family dashboard once the launcher is installed.")
-          : (restarted ? "Switching the TV back to DAKboard." : "Saved. The TV stays on DAKboard."));
-        pageTV(page);
-      } catch (err) {
-        toast(err.message);
-        pageTV(page);
-      }
-    });
-
-    bindSave($("#dak-form"), () => ({ screen: { dakboard_url: $("#dak").value.trim() } }), () => pageTV(page));
-
     $("#tvkey").onclick = async () => {
       if (settings.tv.key.set && !confirm("Make a new TV key? A TV using the old one stops showing the dashboard until it gets the new one.")) return;
       try {
@@ -283,7 +246,7 @@
         const server = location.origin;
         $("#tvkey-out").innerHTML = `
           <p class="sub" style="margin-top:10px">Copy it now; it's shown only once. On the Pi, run:</p>
-          <pre><code>cd ~/family-dashboard && sudo DASHBOARD_SERVER=${esc(server)} DASHBOARD_TV_KEY=${esc(res.key)} ./pi/install.sh</code></pre>
+          <pre><code>cd ~/family-dashboard && sudo DASHBOARD_SERVER=${esc(server)} DASHBOARD_TV_KEY=${esc(res.key)} ./pi/install-display.sh</code></pre>
           <p class="sub">Use the off-site server's https:// address if this page isn't open on it.</p>`;
       } catch (err) {
         toast(err.message);

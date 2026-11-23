@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # Turn a fresh Raspberry Pi OS Lite (Bookworm, 64-bit) into the family TV: a
 # full-screen Chromium inside cage (a one-app Wayland kiosk, no desktop) that
-# shows the dashboard server elsewhere in the house, or DAKboard, whichever
-# Settings → On the TV picks. Run from the project folder copied to the Pi:
+# shows the dashboard server elsewhere in the house. Run from the project folder
+# copied to the Pi:
 #
 #   sudo DASHBOARD_SERVER=http://<server>:8080 \
 #        DASHBOARD_TV_KEY=<key from Settings → On the TV> \
-#        DAKBOARD_URL=https://dakboard.com/display/uuid/... \
 #        ./pi/install-display.sh
 #
 # Optional: DISPLAY_MODE=1920x1080@60 (empty = the TV's own choice, often 4K at 30 Hz).
@@ -20,7 +19,6 @@ DIR="${DASHBOARD_DIR:-/opt/family-dashboard}"
 RUN_USER="${DASHBOARD_USER:-${SUDO_USER:-pi}}"
 SERVER_URL="${DASHBOARD_SERVER:-}"
 TV_KEY="${DASHBOARD_TV_KEY:-}"
-DAK_URL="${DAKBOARD_URL:-}"
 DISPLAY_MODE="${DISPLAY_MODE-1920x1080@60}"
 
 [[ -n "$SERVER_URL" && -n "$TV_KEY" ]] || { echo "Set DASHBOARD_SERVER and DASHBOARD_TV_KEY (make the key in Settings → On the TV)." >&2; exit 1; }
@@ -28,7 +26,7 @@ id "$RUN_USER" >/dev/null 2>&1 || { echo "No user $RUN_USER. Run with sudo from 
 [[ -z "$DISPLAY_MODE" || "$DISPLAY_MODE" =~ ^[0-9]{3,4}x[0-9]{3,4}@[0-9]{2,3}$ ]] || { echo "DISPLAY_MODE looks like 1920x1080@60, not $DISPLAY_MODE" >&2; exit 1; }
 [[ "$RUN_USER" != root ]] || { echo "The TV shouldn't run as root. Run with sudo from the Pi's normal user." >&2; exit 1; }
 if [[ -e /usr/bin/startlxde-pi || -e /usr/bin/labwc || -e /usr/bin/wayfire ]]; then
-  echo "This Pi has a desktop. This installer is for Raspberry Pi OS Lite; on a desktop use ./pi/install.sh." >&2; exit 1
+  echo "This Pi has a desktop. This installer is for Raspberry Pi OS Lite; start from a Lite image." >&2; exit 1
 fi
 UID_N="$(id -u "$RUN_USER")"
 
@@ -45,7 +43,7 @@ echo "==> Copying the launcher to $DIR"
 mkdir -p "$DIR/data"
 if [[ "$SRC" != "$DIR" ]]; then rm -rf "$DIR/pi"; cp -r "$SRC/pi" "$DIR/"; fi
 chmod +x "$DIR/pi/"*.sh
-python3 "$DIR/pi/kiosk_setup.py" display --dir "$DIR" --browser "$BROWSER_BIN" --dakboard-url "$DAK_URL"
+python3 "$DIR/pi/kiosk_setup.py" display --dir "$DIR" --browser "$BROWSER_BIN"
 python3 "$DIR/pi/kiosk_setup.py" configure --dir "$DIR" --server "$SERVER_URL" --tv-key "$TV_KEY"
 sed -i '/^SCREEN_MODE=/d' "$DIR/data/kiosk.env"
 [[ -z "$DISPLAY_MODE" ]] || echo "SCREEN_MODE=$DISPLAY_MODE" >> "$DIR/data/kiosk.env"
@@ -131,7 +129,7 @@ echo "==> Checking that $SERVER_URL knows this TV"
 if answer="$(curl -fsS --max-time 10 -H "Authorization: Bearer $TV_KEY" "$SERVER_URL/api/screen-url")"; then
   echo "It answered: the TV will show $(printf '%s\n' "$answer" | head -n1)"
 else
-  echo "The server didn't accept this TV yet (wrong key, or not reachable). The TV shows DAKboard until it does." >&2
+  echo "The server didn't accept this TV yet (wrong key, or not reachable). The TV shows a waiting page until it does." >&2
 fi
 echo
 echo "Done. Reboot to start the TV: sudo reboot"

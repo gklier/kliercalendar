@@ -138,7 +138,7 @@ sudo DASHBOARD_SERVER=http://<server>:8080 DASHBOARD_TV_KEY=<the key> ./pi/insta
 sudo reboot
 ```
 
-The installer sets up a full-screen Chromium inside [cage](https://github.com/cage-kiosk/cage) (no desktop), starts it at boot, sets the video output to 1080p at 60 Hz (a Pi 4 animates far more smoothly than at 4K), turns off Wi-Fi power saving, and hands the sleep schedule to the server. Add `DAKBOARD_URL=<link>` to keep a hosted dashboard as the fallback.
+The installer sets up a full-screen Chromium inside [cage](https://github.com/cage-kiosk/cage) (no desktop), starts it at boot, sets the video output to 1080p at 60 Hz (a Pi 4 animates far more smoothly than at 4K), turns off Wi-Fi power saving, and hands the sleep schedule to the server. If the server can't be reached, the TV shows a waiting page and keeps trying.
 
 ## Using it
 

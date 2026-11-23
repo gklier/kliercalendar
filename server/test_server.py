@@ -282,7 +282,7 @@ class DashboardTest(unittest.TestCase):
                       "active_hours": None,
                       "places": [{"name": "Office", "icon": "work", "address": "200 Office Park Road, Springfield"},
                                  {"name": "Island", "icon": "pin", "address": "Nowhere"}]},
-            "screen": {"mode": "dakboard", "dakboard_url": "https://dakboard.com/screen/abc"},
+            "screen": {"mode": "old", "link": "https://old.example/screen/abc"},      # a setting from an older version
         }))
         cls.state = Path(cls.tmp.name) / "state"
         cls.state.mkdir()
@@ -765,7 +765,7 @@ class DashboardTest(unittest.TestCase):
 
         s, st = c.call("/admin/api/settings")
         raw = json.dumps(st)
-        for secret in ("TOKEN", "KEY", "family.ics", "dakboard.com/screen", "password_hash"):
+        for secret in ("TOKEN", "KEY", "family.ics", "old.example/screen", "password_hash"):
             self.assertNotIn(secret, raw)
         self.assertTrue(st["tempest"]["token"]["set"])
 
@@ -802,17 +802,21 @@ class DashboardTest(unittest.TestCase):
 
     def test_screen_url_and_reload(self):
         url, nonce, sleeping = Client(self.base).call("/api/screen-url")[1].decode().splitlines()
-        self.assertEqual(url, "https://dakboard.com/screen/abc")
+        self.assertEqual(url, f"http://localhost:{self.app.config.get('port', 8080)}/?mode=live")
         self.assertIn(sleeping, ("asleep", "awake"))
         c = self.signed_in()
-        s, res = c.call("/admin/api/settings", {"screen": {"mode": "dashboard"}})
-        self.assertTrue(res["screen"]["restarted"])  # the launcher checked in just now
-        url2, nonce2, _ = Client(self.base).call("/api/screen-url")[1].decode().splitlines()
-        self.assertIn("localhost", url2)
+        self.assertNotIn("screen", c.call("/admin/api/settings")[1])                  # an older version's setting is never offered
+        self.assertTrue(c.call("/admin/api/screen/reload", {})[1]["restarted"])       # the launcher checked in just now
+        nonce2 = Client(self.base).call("/api/screen-url")[1].decode().splitlines()[1]
         self.assertNotEqual(nonce, nonce2)
         self.app.kiosk_seen = 0
         self.assertFalse(c.call("/admin/api/screen/reload", {})[1]["restarted"])
-        self.app.save(server.apply_settings(self.app.config, {"screen": {"mode": "dakboard"}}))
+        before = server.copy.deepcopy(self.app.config)
+        try:
+            self.app.save(server.apply_settings(self.app.config, {"schedule": {"enabled": True}}))
+            self.assertNotIn("screen", self.app.config)                                 # dropped from disk on the next save
+        finally:
+            self.app.save(before)
 
     def test_google_account_calendars(self):
         c = self.signed_in()
@@ -877,7 +881,7 @@ class OffsiteTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         cfg = Path(self.tmp.name) / "config.json"
-        cfg.write_text(json.dumps({"screen": {"mode": "dashboard", "dakboard_url": "https://dakboard.com/screen/abc"}}))
+        cfg.write_text(json.dumps({}))
         (Path(self.tmp.name) / "state").mkdir()
         self.app = server.App(server.Store(cfg), WEB, Path(self.tmp.name) / "state", offsite=True)
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(self.app))
@@ -1051,7 +1055,6 @@ class SettingsValidationTest(unittest.TestCase):
         self.bad({"tempest": {"station_id": "abc"}}, "Station ID")
         self.bad({"timezone": "Mars/Base"}, "time zone")
         self.bad({"drive": {"active_hours": ["25:00", "06:00"]}}, "06:30")
-        self.bad({"screen": {"mode": "netflix"}}, "TV shows")
         self.bad({"calendar": {"account": {"app_password": "password123"}}}, "16 letters")
         self.bad({"photos": {"folder": "relative/path"}}, "full path")
         self.bad({"stocks": {"symbols": ["AAPL", "rm -rf"]}}, "ticker")

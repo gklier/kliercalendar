@@ -19,7 +19,7 @@ Data the TV reads:
   /api/version    Changes whenever settings are saved; the TV reloads on change
 
 The kiosk launcher on the Pi asks /api/screen-url which page the TV should show
-(DAKboard or this dashboard). Switching restarts the browser on the new page.
+and whether the screen should be asleep. "Reload the TV" restarts the browser.
 
 Off-site (DASHBOARD_OFFSITE=1, or --offsite): the server runs somewhere else,
 usually in Docker behind an HTTPS proxy, and the Pi only displays it. Requests
@@ -150,7 +150,6 @@ DEFAULT_CONFIG: dict = {
     },
     "photos": {"folder": ""},
     "stocks": {"enabled": False, "symbols": [], "refresh_seconds": 30},
-    "screen": {"mode": "dakboard", "dakboard_url": ""},
     # When the TV sleeps: rules by weekday (0 = Monday), applied by the TV launcher within seconds
     "schedule": {"enabled": True, "rules": [
         {"id": "nightly", "days": [0, 1, 2, 3, 4, 5, 6], "off": "22:00", "on": "06:45", "enabled": True}]},
@@ -617,12 +616,7 @@ def apply_settings(current: dict, patch: dict) -> dict:
             raise ValueError("Photo folder must be a full path to a folder on the Pi, like /media/usb/Family")
         c["photos"]["folder"] = folder
 
-    if "screen" in patch:
-        s = patch["screen"]
-        if "mode" in s:
-            c["screen"]["mode"] = _choice(s["mode"], "TV shows", {"dakboard", "dashboard"})
-        if s.get("dakboard_url"):
-            c["screen"]["dakboard_url"] = _url(s["dakboard_url"], "DAKboard link")
+    c.pop("screen", None)                   # the old "which screen" choice: the TV always shows this dashboard now
 
     return c
 
@@ -640,7 +634,7 @@ def public_settings(c: dict) -> dict:
     out["drive"]["api_key"] = mask(c["drive"]["api_key"])
     out["stocks"].pop("api_key", None)      # never send an old Finnhub key to a browser
     out["ha"]["token"] = mask(c["ha"]["token"])
-    out["screen"]["dakboard_url"] = mask(c["screen"]["dakboard_url"])
+    out.pop("screen", None)
     acc = out["calendar"]["account"]
     acc["app_password"] = {"set": bool(c["calendar"]["account"]["app_password"]), "hint": ""}
     acc.pop("base_url", None)
@@ -1808,12 +1802,8 @@ class App:
     # --- the TV screen
 
     def screen_url(self) -> str:
-        """DAKboard's link, or this dashboard's own page. On the Pi that's a full
-        localhost link (what every launcher understands); off-site it's a path the
-        launcher opens through /tv on the server's address."""
-        s = self.config["screen"]
-        if s["mode"] == "dakboard" and s["dakboard_url"]:
-            return s["dakboard_url"]
+        """This dashboard's own page. On the Pi that's a full localhost link; off-site
+        it's a path the launcher opens through /tv on the server's address."""
         return "/?mode=live" if self.offsite else f"http://localhost:{self.config.get('port', 8080)}/?mode=live"
 
     def tv_key_ok(self, key: str | None) -> bool:
@@ -1891,7 +1881,7 @@ class App:
         return {
             "sources": {k: s.status() for k, s in self.sources.items()},
             "calendars": cal_status,
-            "screen": {"mode": self.config["screen"]["mode"], "kiosk": self.kiosk_online(), "frames": self.tv_frames or None,
+            "screen": {"kiosk": self.kiosk_online(), "frames": self.tv_frames or None,
                        "sleep": self.sleep_now()},
             "info": self.info(),
             "photos": len(self.photos()),
@@ -2208,12 +2198,8 @@ def make_handler(app: App):
                 app.store.save(new)
                 return self._json(200, {"ok": True})
             if name == "settings":
-                before = app.config["screen"]["mode"]
                 app.save(apply_settings(app.config, data), quiet=set(data) <= {"schedule"})
-                out = {"ok": True, "settings": public_settings(app.config)}
-                if app.config["screen"]["mode"] != before:
-                    out["screen"] = app.reload_tv()
-                return self._json(200, out)
+                return self._json(200, {"ok": True, "settings": public_settings(app.config)})
             if name == "screen/reload":
                 return self._json(200, app.reload_tv())
             if name == "screen/sleep":
@@ -2285,7 +2271,7 @@ def make_handler(app: App):
 def warm_names(app: "App") -> list:
     """The feeds worth keeping fresh in the background, so the TV and the settings never wait for them."""
     c = app.config
-    return (["weather", "calendar"] + (["drive"] if c["screen"]["mode"] == "dashboard" else [])
+    return (["weather", "calendar", "drive"]
             + (["stocks"] if c["stocks"]["enabled"] and c["stocks"]["symbols"] else []))
 
 

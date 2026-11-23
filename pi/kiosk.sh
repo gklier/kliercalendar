@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Family Dashboard TV launcher. The desktop's autostart runs this in place of
-# the original DAKboard browser line. It asks the dashboard server which page
-# to show, opens the browser there, and checks every few seconds: when the
-# answer changes (switched in Settings, or "Reload the TV"), it reopens the
-# browser. If the server never answers, the TV shows DAKboard as before.
+# Family Dashboard TV launcher, started by the family-tv service under cage. It asks
+# the dashboard server which page to show, opens the browser there, and checks every
+# few seconds: when the answer changes ("Reload the TV"), it reopens the browser.
+# If the server never answers, the TV shows a waiting page and keeps trying.
 # SERVER is the dashboard server: this Pi, unless it runs off-site, where
 # TV_KEY proves to it that this is the family TV. The server's answer also says
 # whether the screen should be asleep (Settings → Schedule); this script switches
 # the HDMI output and the TV to match.
 DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")/.." && pwd)"
+WAITING_PAGE="data:text/html,<body style='background:%230B1626;color:%23aaa;font:600 32px sans-serif;display:grid;place-items:center;height:100vh;margin:0'>Waiting for the family dashboard server..."
 # shellcheck source=/dev/null
-source "$DIR/data/kiosk.env"      # CMD=(browser args with __URL__), DAKBOARD_URL, PORT[, SERVER, TV_KEY]
+source "$DIR/data/kiosk.env"      # CMD=(browser args with __URL__), PORT[, SERVER, TV_KEY]
 SERVER="${SERVER:-http://localhost:${PORT:-8080}}"
 SERVER="${SERVER%/}"
 
@@ -22,7 +22,7 @@ ask() {
   fi
 }
 
-# The server answers a full link (DAKboard) or a path on itself (/?mode=live).
+# The server answers a path on itself (/?mode=live).
 # Off-site, its pages open through /tv, which trades the key for a cookie; the
 # key rides after "#", so it never leaves this Pi.
 page() {
@@ -61,7 +61,7 @@ if [ "${KIOSK_LIB_ONLY:-}" = 1 ]; then return 0 2>/dev/null || exit 0; fi
 if [ "${1:-}" = "--print-url" ]; then   # for tests and troubleshooting: what would the TV open?
   answer=$(ask) || answer=""
   url=$(printf '%s\n' "$answer" | head -n1)
-  if [ -n "$url" ]; then page "$url"; else printf '%s' "$DAKBOARD_URL"; fi
+  if [ -n "$url" ]; then page "$url"; else printf '%s' "$WAITING_PAGE"; fi
   echo
   exit 0
 fi
@@ -78,7 +78,7 @@ sync_screen "$answer"
 
 while true; do
   url=$(printf '%s\n' "$answer" | head -n1)
-  if [ -n "$url" ]; then url=$(page "$url"); else url="$DAKBOARD_URL"; fi
+  if [ -n "$url" ]; then url=$(page "$url"); else url="$WAITING_PAGE"; fi
   # Stop Chromium offering to restore pages after a restart
   prefs="$HOME/.config/chromium/Default/Preferences"
   [ -f "$prefs" ] && sed -i 's/"exited_cleanly":false/"exited_cleanly":true/; s/"exit_type":"[^"]*"/"exit_type":"Normal"/' "$prefs"

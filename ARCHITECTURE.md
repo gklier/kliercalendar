@@ -48,9 +48,9 @@ flowchart TB
 | `web/admin/` | The settings site: `admin.js` (shell and a few pages) plus `pages-*.js` modules |
 | `pi/install-display.sh` | Turns a fresh Raspberry Pi OS Lite into the TV |
 | `pi/kiosk.sh`, `screen.sh` | The launcher and the screen on/off helper |
-| `pi/install.sh`, `restore.sh`, `kiosk_setup.py` | The older single-Pi installer for DAKboard OS, and the shared patching code |
+| `pi/kiosk_setup.py` | Writes the launcher's settings file (browser command, server address, TV key) |
 | `tools/backup-sd-card.sh` | Makes a compressed image of the TV's SD card on a Mac |
-| `compose.yaml`, `Dockerfile` | The server stack; `compose.pi.yaml` is only for the older single-Pi setup |
+| `compose.yaml`, `Dockerfile` | The server stack |
 
 ## The server (`server/server.py`)
 
@@ -115,8 +115,8 @@ Plain JavaScript, no build step. `admin.js` is the shell (sign-in, routing, Simp
 
 ## The TV (`pi/`)
 
-`family-tv.service` runs `cage -- pi/kiosk.sh`. The launcher sources `data/kiosk.env` (the browser command, the server address and the TV key), asks the server what to show, opens Chromium on it, and polls every five seconds. When the first two lines of the answer change it restarts the browser. The third line drives `screen.sh`, which switches the HDMI output (`wlr-randr`) and the TV (HDMI-CEC, `cec-ctl`); the launcher re-checks every 30 seconds so a stray wake can't stick. If the server never answers, the launcher opens the fallback link it was installed with.
+`family-tv.service` runs `cage -- pi/kiosk.sh`. The launcher sources `data/kiosk.env` (the browser command, the server address and the TV key), asks the server what to show, opens Chromium on it, and polls every five seconds. When the first two lines of the answer change it restarts the browser. The third line drives `screen.sh`, which switches the HDMI output (`wlr-randr`) and the TV (HDMI-CEC, `cec-ctl`); the launcher re-checks every 30 seconds so a stray wake can't stick. If the server never answers, the launcher shows a waiting page and keeps asking.
 
 ## Testing
 
-`server/test_server.py` starts the real server against fake Tempest, CalDAV, Routes and Home Assistant servers (and a stand-in for `yfinance`) and exercises it over HTTP. `pi/test_kiosk_setup.py` tests the installer's patching and the launcher's functions (sourced with `KIOSK_LIB_ONLY=1`) against stand-in commands.
+`server/test_server.py` starts the real server against fake Tempest, CalDAV, Routes and Home Assistant servers (and a stand-in for `yfinance`) and exercises it over HTTP. `pi/test_kiosk_setup.py` tests the settings writer and the launcher's functions (sourced with `KIOSK_LIB_ONLY=1`) against stand-in commands.
