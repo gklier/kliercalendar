@@ -5,7 +5,7 @@
   "use strict";
   const FD = (window.FD = window.FD || { pages: {} });
   const W = 1920, H = 1080, STEP = 10, MIN_W = 80, MIN_H = 40;
-  const NAMES = { clock: "Clock", weather: "Weather", drive: "Drive times", calendar: "Calendar", focus: "Today panel", ticker: "Stock bar" };
+  const NAMES = { clock: "Clock", weather: "Weather", drive: "Drive times", calendar: "Calendar", focus: "Today panel", ticker: "Stock bar", home: "Home status", camera: "Camera" };
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const snap = (n) => Math.round(n / STEP) * STEP;
 
@@ -19,8 +19,32 @@
       { type: "calendar", x: 32, y: 214, w: 1422, h: tall, visible: true, scale: 1, options: { days: 14 } },
       { type: "focus", x: 1478, y: 214, w: 410, h: tall, visible: true, scale: 1 },
       { type: "ticker", x: 32, y: 1004, w: 1856, h: 50, visible: true, scale: "auto", options: { speed: 90 } },
+      // Home Assistant widgets start switched off: the Smart home page (or the box below) turns them on
+      { type: "home", x: 32, y: 214, w: 1422, h: 64, visible: false, scale: "auto" },
+      { type: "camera", x: 1478, y: 654, w: 410, h: 326, visible: false, scale: "auto", options: { camera: "" } },
     ];
   }
+
+  // Used by the Smart home page: switch a widget on in the saved layout, making room for it
+  FD.addWidget = async function (type) {
+    const s = FD.settings, saved = s.layout && s.layout.widgets;
+    const base = builtIn(!!(s.stocks.enabled && s.stocks.symbols.length));
+    const widgets = base.map((b) => { const f = saved && saved.find((w) => w.type === b.type); return f ? JSON.parse(JSON.stringify(f)) : { ...b, visible: !saved && b.visible !== false }; });
+    const get = (t) => widgets.find((w) => w.type === t), me = get(type), cal = get("calendar"), foc = get("focus");
+    if (me.visible) return "already";
+    me.visible = true;
+    if (type === "home") {
+      if (cal.y === 214) { cal.y += 84; cal.h -= 84; }           // the strip sits above the calendar, which gives up a band
+      Object.assign(me, { x: cal.x, y: 214, w: cal.w, h: 64 });
+    } else if (type === "camera") {
+      if (foc.y === 214 && foc.h > 500) foc.h = 416;             // the tile sits under the Today panel, which gives up its lower part
+      const top = foc.y + foc.h + 24;
+      Object.assign(me, { x: foc.x, y: top, w: foc.w, h: Math.max(cal.y + cal.h - top, 160) });
+    }
+    const res = await FD.api("settings", { layout: { version: 1, widgets } });
+    FD.settings = res.settings;
+    return "added";
+  };
 
   FD.pages.layout = function (page) {
     const { $, $$, esc, api, toast } = FD;
@@ -30,7 +54,7 @@
     const base = builtIn(tickerOn);
     let widgets = base.map((b) => {
       const s = saved && saved.find((w) => w.type === b.type);
-      return s ? JSON.parse(JSON.stringify(s)) : { ...b, visible: !saved };
+      return s ? JSON.parse(JSON.stringify(s)) : { ...b, visible: !saved && b.visible !== false };
     });
     let selected = "calendar", sample = true, dirty = false, scale = 0.4, raf = 0;
 
@@ -68,6 +92,8 @@
             <select id="f-scale">${zooms.map(([v, l]) => `<option value="${v}" ${String(w.scale) === String(v) ? "selected" : ""}>${l}</option>`).join("")}</select></label>
           ${selected === "calendar" ? `<label class="tfield">Shows
             <select id="f-days">${[[7, "1 week"], [14, "2 weeks"], [21, "3 weeks"], [28, "4 weeks"]].map(([v, l]) => `<option value="${v}" ${(w.options && w.options.days) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
+          ${selected === "camera" ? `<label class="tfield">Shows
+            <select id="f-cam"><option value="">Each camera in turn</option>${(FD.settings.ha.cameras || []).map((c) => `<option value="${esc(c.id)}" ${(w.options && w.options.camera) === c.id ? "selected" : ""}>${esc(c.name || c.id)}</option>`).join("")}</select></label>` : ""}
           ${selected === "ticker" ? `<label class="tfield">Speed
             <select id="f-speed">${[[60, "Slow"], [90, "Normal"], [130, "Fast"]].map(([v, l]) => `<option value="${v}" ${(w.options && w.options.speed) === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}
           <label class="show"><input type="checkbox" id="f-vis" ${w.visible ? "checked" : ""}> Show on the TV</label>
@@ -80,6 +106,7 @@
       $("#f-vis").onchange = (e) => { w.visible = e.target.checked; changed(); drawList(); };
       const days = $("#f-days"); if (days) days.onchange = (e) => { w.options = { days: Number(e.target.value) }; changed(); };
       const speed = $("#f-speed"); if (speed) speed.onchange = (e) => { w.options = { speed: Number(e.target.value) }; changed(); };
+      const cam = $("#f-cam"); if (cam) cam.onchange = (e) => { w.options = { camera: e.target.value }; changed(); };
     }
 
     function drawList() {

@@ -12,6 +12,9 @@ Data the TV reads:
   /api/calendar   Google Calendar secret iCal links, expanded
   /api/drive      Always-on drive times (Google Routes route matrix)
   /api/route      Leave-by time for one calendar event's location
+  /api/home       Status tiles from Home Assistant (locks, doors, alarm, people); TV and settings only
+  /api/cameras    Which cameras have motion, for the pop-up; TV and settings only
+  /api/ha/camera/<id>.jpg   A still from a chosen camera, through this server; TV and settings only
   /api/config     Display settings (no secrets)
   /api/version    Changes whenever settings are saved; the TV reloads on change
 
@@ -61,10 +64,12 @@ DEFAULT_WEB_ROOT = HERE.parent / "web"
 TEMPEST_URL = "https://swd.weatherflow.com/swd/rest/better_forecast"
 MATRIX_URL = "https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix"
 ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
-FINNHUB_URL = "https://finnhub.io/api/v1/quote"
-FINNHUB_SEARCH = "https://finnhub.io/api/v1/search"
 APP_VERSION = "2.1"
-SYMBOL = re.compile(r"^[A-Z0-9][A-Z0-9.\-:]{0,14}$")
+# Yahoo's symbols: AAPL, BRK-B, SAP.DE, BTC-USD, EURUSD=X, and indexes like ^GSPC
+SYMBOL = re.compile(r"^[\^A-Z0-9][A-Z0-9.\-:=^]{0,14}$")
+# What people type for the things they mean, and Yahoo's name for them
+SYMBOL_ALIASES = {"NASDAQ": "^IXIC", "SP500": "^GSPC", "SPX": "^GSPC", "DOW": "^DJI", "DJI": "^DJI", "RUSSELL": "^RUT", "VIX": "^VIX"}
+SYMBOL_LABELS = {"^GSPC": "S&P 500", "^DJI": "Dow", "^IXIC": "Nasdaq", "^RUT": "Russell 2000", "^VIX": "VIX", "^NDX": "Nasdaq 100"}
 # Google's original CalDAV address. It still accepts app passwords; the newer
 # apidata.googleusercontent.com one only takes OAuth.
 GOOGLE_DAV = "https://www.google.com/calendar/dav"
@@ -144,13 +149,16 @@ DEFAULT_CONFIG: dict = {
         "bgGradient": {"a": "#1B2A49", "b": "#4B2E6F", "angle": 160},
     },
     "photos": {"folder": ""},
-    "stocks": {"enabled": False, "api_key": "", "symbols": [], "refresh_seconds": 15},
+    "stocks": {"enabled": False, "symbols": [], "refresh_seconds": 30},
     "screen": {"mode": "dakboard", "dakboard_url": ""},
     # When the TV sleeps: rules by weekday (0 = Monday), applied by the TV launcher within seconds
     "schedule": {"enabled": True, "rules": [
         {"id": "nightly", "days": [0, 1, 2, 3, 4, 5, 6], "off": "22:00", "on": "06:45", "enabled": True}]},
     # Free layout: None keeps the built-in arrangement; see _layout() for the shape
     "layout": None,
+    # Home Assistant: locks, doors and the like as status tiles, and cameras as a tile or a motion pop-up
+    "ha": {"enabled": False, "url": "", "token": "", "entities": [], "cameras": [],
+           "popup": {"enabled": True, "seconds": 30}, "alert_minutes": 10, "refresh_seconds": 10},
     "tv": {"key_hash": ""},
     "admin": {"password_hash": ""},
 }
@@ -229,10 +237,51 @@ def _choice(v: Any, name: str, options: set) -> str:
     return v
 
 
+ENTITY_ID = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
+HA_STATUS_DOMAINS = {"lock", "cover", "binary_sensor", "alarm_control_panel", "person"}
+HA_TOKEN = re.compile(r"^[A-Za-z0-9._~+/=-]{20,2000}$")
 BG_CHOICES = {"sky", "photos", "photo", "gradient", "color"}
 APPEARANCE = {"auto", "light", "dark"}
 PHOTO_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,100}$")
-LAYOUT_TYPES = ("clock", "weather", "drive", "calendar", "focus", "ticker")
+LAYOUT_TYPES = ("clock", "weather", "drive", "calendar", "focus", "ticker", "home", "camera")
+
+
+def normalize_symbol(sym: str) -> str:
+    """AAPL, $aapl, BRK.B and NASDAQ all become what Yahoo calls them: AAPL, AAPL, BRK-B and ^IXIC."""
+    sym = sym.strip().upper().lstrip("$")
+    if sym in SYMBOL_ALIASES:
+        return SYMBOL_ALIASES[sym]
+    m = re.fullmatch(r"([A-Z]{1,5})\.([AB])", sym)       # US class shares: Yahoo writes a dash, not a dot
+    return f"{m.group(1)}-{m.group(2)}" if m else sym
+
+
+def stock_label(sym: str) -> str:
+    if sym in SYMBOL_LABELS:
+        return SYMBOL_LABELS[sym]
+    if sym.endswith("-USD") and len(sym) <= 9:
+        return sym[:-4]                                    # BTC-USD shows as BTC
+    return sym.lstrip("^")
+
+
+_YF_LOCK = threading.Lock()
+_YF = None
+
+
+def load_yfinance():
+    """yfinance is imported when first needed: it brings in pandas and numpy (about 100 MB), which nothing else here uses.
+    Its small cache folder is made once, here, because its worker threads would otherwise race to create it."""
+    global _YF
+    with _YF_LOCK:
+        if _YF is None:
+            import yfinance
+            cache = Path(os.environ.get("YF_CACHE_DIR") or Path.home() / ".cache" / "family-dashboard-yfinance")
+            try:
+                cache.mkdir(parents=True, exist_ok=True)
+                yfinance.set_tz_cache_location(str(cache))
+            except Exception as e:  # noqa: BLE001 — a cache is only a speed-up
+                log.warning("yfinance cache folder not usable: %s", e)
+            _YF = yfinance
+        return _YF
 
 
 def _colour(v: Any, name: str) -> str:
@@ -275,8 +324,67 @@ def _layout(v: Any) -> dict | None:
             item["options"] = {"days": _choice(o.get("days", 14), "Days shown", {7, 14, 21, 28})}
         elif t == "ticker":
             item["options"] = {"speed": _int(o.get("speed", 90), "Ticker speed", 30, 240)}
+        elif t == "camera":
+            cam = o.get("camera", "")
+            if cam and (not isinstance(cam, str) or not ENTITY_ID.match(cam) or not cam.startswith("camera.")):
+                raise ValueError("Pick a camera from the list")
+            item["options"] = {"camera": cam}
         out.append(item)
     return {"version": 1, "widgets": out}
+
+
+def _ha_entity(e: Any, i: int, domains: set, what: str) -> dict:
+    if not isinstance(e, dict) or not isinstance(e.get("id"), str) or not ENTITY_ID.match(e["id"]):
+        raise ValueError(f"{what} {i} isn't a Home Assistant item")
+    if e["id"].split(".", 1)[0] not in domains:
+        raise ValueError(f"{e['id']} can't be shown here")
+    return {"id": e["id"], "name": _str(e.get("name", ""), f"{what} {i} name", 40)}
+
+
+def _ha(patch: dict, cur: dict) -> dict:
+    c = copy.deepcopy(cur)
+    if "enabled" in patch:
+        c["enabled"] = bool(patch["enabled"])
+    if "url" in patch:
+        url = _url(patch["url"], "Home Assistant address").rstrip("/")
+        if url and urllib.parse.urlsplit(url).scheme not in ("http", "https"):
+            raise ValueError("The Home Assistant address must start with http:// or https://")
+        if c["url"] != url:
+            c["token"] = ""                     # a token belongs to one Home Assistant
+        c["url"] = url
+    if patch.get("token"):
+        tok = _str(patch["token"], "Home Assistant token", 2000)
+        if not HA_TOKEN.match(tok):
+            raise ValueError("That doesn't look like a long-lived access token. Copy the whole token from your Home Assistant profile.")
+        c["token"] = tok
+    if "entities" in patch:
+        ents = patch["entities"]
+        if not isinstance(ents, list) or len(ents) > 24:
+            raise ValueError("Up to 24 status tiles fit on the TV")
+        c["entities"] = [_ha_entity(e, i, HA_STATUS_DOMAINS, "Status tile") for i, e in enumerate(ents, 1)]
+    if "cameras" in patch:
+        cams = patch["cameras"]
+        if not isinstance(cams, list) or len(cams) > 8:
+            raise ValueError("Up to 8 cameras are supported")
+        out = []
+        for i, cam in enumerate(cams, 1):
+            item = _ha_entity(cam, i, {"camera"}, "Camera")
+            sensors = cam.get("motion", [])
+            if not isinstance(sensors, list) or len(sensors) > 3:
+                raise ValueError(f"Camera {i} can use up to 3 motion sensors")
+            item["motion"] = [_ha_entity({"id": x}, i, {"binary_sensor"}, "Motion sensor")["id"] for x in sensors]
+            item["popup"] = bool(cam.get("popup", True))
+            out.append(item)
+        c["cameras"] = out
+    if "popup" in patch:
+        pu = patch["popup"] if isinstance(patch["popup"], dict) else {}
+        c["popup"] = {"enabled": bool(pu.get("enabled", c["popup"]["enabled"])),
+                      "seconds": _int(pu.get("seconds", c["popup"]["seconds"]), "Pop-up time", 5, 300)}
+    if "alert_minutes" in patch:
+        c["alert_minutes"] = _int(patch["alert_minutes"], "Alert after", 0, 1440)
+    if "refresh_seconds" in patch:
+        c["refresh_seconds"] = _int(patch["refresh_seconds"], "Refresh", 5, 300)
+    return c
 
 
 def _schedule_rules(rules: Any) -> list:
@@ -310,6 +418,7 @@ def apply_settings(current: dict, patch: dict) -> dict:
     if not isinstance(patch, dict):
         raise ValueError("Settings must be an object")
     c = copy.deepcopy(current)
+    c["stocks"].pop("api_key", None)        # an old Finnhub key: prices come from Yahoo now, so don't keep a secret nobody uses
 
     if "timezone" in patch:
         tz = _str(patch["timezone"], "Time zone", 60)
@@ -461,14 +570,17 @@ def apply_settings(current: dict, patch: dict) -> dict:
     if "layout" in patch:
         c["layout"] = _layout(patch["layout"])
 
+    if "ha" in patch:
+        if not isinstance(patch["ha"], dict):
+            raise ValueError("Home Assistant settings must be an object")
+        c["ha"] = _ha(patch["ha"], c["ha"])
+
     if "stocks" in patch:
         st = patch["stocks"]
         if "enabled" in st:
             c["stocks"]["enabled"] = bool(st["enabled"])
-        if st.get("api_key"):
-            c["stocks"]["api_key"] = _str(st["api_key"], "Finnhub key", 100)
         if "refresh_seconds" in st:
-            c["stocks"]["refresh_seconds"] = _int(st["refresh_seconds"], "Stock refresh", 5, 600)
+            c["stocks"]["refresh_seconds"] = _int(st["refresh_seconds"], "Stock refresh", 15, 600)
         if "symbols" in st:
             syms = st["symbols"]
             if isinstance(syms, str):
@@ -477,11 +589,11 @@ def apply_settings(current: dict, patch: dict) -> dict:
                 raise ValueError("Tickers must be a list, like AAPL, MSFT, SPY")
             out = []
             for sym in syms:
-                sym = _str(sym, "Ticker", 15).upper().lstrip("$")
+                sym = normalize_symbol(_str(sym, "Ticker", 15))
                 if not sym:
                     continue
                 if not SYMBOL.match(sym):
-                    raise ValueError(f"{sym} doesn't look like a ticker. Use symbols like AAPL or BRK.B")
+                    raise ValueError(f"{sym} doesn't look like a ticker. Use symbols like AAPL, BRK-B or ^GSPC")
                 if sym not in out:
                     out.append(sym)
             if len(out) > 30:
@@ -515,7 +627,8 @@ def public_settings(c: dict) -> dict:
     out["tv"] = {"key": {"set": bool(c["tv"]["key_hash"]), "hint": ""}}
     out["tempest"]["token"] = mask(c["tempest"]["token"])
     out["drive"]["api_key"] = mask(c["drive"]["api_key"])
-    out["stocks"]["api_key"] = mask(c["stocks"]["api_key"])
+    out["stocks"].pop("api_key", None)      # never send an old Finnhub key to a browser
+    out["ha"]["token"] = mask(c["ha"]["token"])
     out["screen"]["dakboard_url"] = mask(c["screen"]["dakboard_url"])
     acc = out["calendar"]["account"]
     acc["app_password"] = {"set": bool(c["calendar"]["account"]["app_password"]), "hint": ""}
@@ -1119,12 +1232,13 @@ class DriveSource(Source):
 
 
 # --------------------------------------------------------------------------
-# Stock ticker (Finnhub quotes)
+# Stock ticker (Yahoo Finance, through the yfinance package)
 # --------------------------------------------------------------------------
 
 class Stocks:
-    """Latest price and change for each ticker. Finnhub's free plan allows 60
-    requests a minute, so the refresh is stretched to stay under 50."""
+    """Latest price and change for each ticker, from Yahoo Finance. It needs no key, but it isn't an official
+    service: prices can be delayed (up to about 15 minutes on some exchanges) and Yahoo can change or limit
+    it without notice. Each symbol is its own request, so the refresh is stretched with the number of tickers."""
 
     def __init__(self, cfg: dict, tz: ZoneInfo):
         self.cfg = cfg
@@ -1133,34 +1247,34 @@ class Stocks:
 
     def interval(self) -> float:
         n = len(self.cfg.get("symbols") or [])
-        base = max(float(self.cfg.get("refresh_seconds", 15)), n * 60 / 50)
+        base = max(float(self.cfg.get("refresh_seconds", 30)), n * 2.5)
         # US markets (with pre- and after-hours) run 4 AM to 8 PM Eastern on weekdays
         et = dt.datetime.now(ZoneInfo("America/New_York"))
         open_now = et.weekday() < 5 and 4 <= et.hour < 20
         return base if open_now else max(base, 900)
 
     def quote(self, sym: str) -> dict:
-        q = urllib.parse.urlencode({"symbol": sym, "token": self.cfg["api_key"]})
-        raw = http_json(f"{self.cfg.get('base_url', FINNHUB_URL)}?{q}", timeout=10)
-        if not isinstance(raw, dict) or "error" in raw:
-            raise UpstreamError(f"Finnhub: {raw.get('error') if isinstance(raw, dict) else 'unexpected answer'}")
-        price, prev = _num(raw.get("c")), _num(raw.get("pc"))
-        if not price:  # Finnhub answers 0 for symbols it doesn't know
-            raise UpstreamError(f"Finnhub has no price for {sym}")
-        change = _num(raw.get("d"))
-        pct = _num(raw.get("dp"))
-        if change is None and prev:
-            change = price - prev
-        if pct is None and prev:
-            pct = change / prev * 100
-        return {"symbol": sym, "price": round(price, 2), "change": round(change or 0, 2),
-                "percent": round(pct or 0, 2), "at": raw.get("t")}
+        yf = load_yfinance()
+        try:
+            info = yf.Ticker(sym).fast_info
+            price, prev = _num(info["lastPrice"]), _num(info["previousClose"])
+        except Exception as e:  # noqa: BLE001 — yfinance raises KeyError, rate-limit errors and network errors alike
+            if "RateLimit" in e.__class__.__name__:
+                raise UpstreamError("Yahoo is limiting requests for a moment. The last prices stay on the bar.") from None
+            raise UpstreamError(f"Yahoo has no price for {sym}") from None
+        if not price or price != price:                     # nothing, zero or NaN
+            raise UpstreamError(f"Yahoo has no price for {sym}")
+        change = price - prev if prev and prev == prev else 0.0
+        pct = change / prev * 100 if prev and prev == prev else 0.0
+        return {"symbol": sym, "label": stock_label(sym), "price": round(price, 4), "change": round(change, 4),
+                "percent": round(pct, 2), "at": int(time.time())}
 
     def fetch(self) -> dict:
         if not self.cfg.get("enabled"):
             raise UpstreamError("The stock bar is off. Turn it on in Settings → Stocks")
-        if not self.cfg.get("api_key") or not self.cfg.get("symbols"):
-            raise UpstreamError("Add a Finnhub key and some tickers in Settings → Stocks")
+        symbols = list(dict.fromkeys(normalize_symbol(x) for x in (self.cfg.get("symbols") or [])))
+        if not symbols:
+            raise UpstreamError("Add some tickers in Settings → Stocks")
         from concurrent.futures import ThreadPoolExecutor
 
         def one(sym):
@@ -1170,25 +1284,252 @@ class Stocks:
                 return str(e)
             return None
 
-        with ThreadPoolExecutor(max_workers=6) as pool:
-            errors = [e for e in pool.map(one, self.cfg["symbols"]) if e]
-        quotes = [self.last[s] for s in self.cfg["symbols"] if s in self.last]
+        # The first request sets up Yahoo's session (cookie and crumb). Doing it alone first avoids a race that
+        # makes a few symbols fail at random on a cold start; then the rest go in parallel, and each failure gets one more try.
+        result = {symbols[0]: one(symbols[0])}
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            result.update(zip(symbols[1:], pool.map(one, symbols[1:])))
+        for sym in symbols:
+            if result[sym] and "limiting" not in result[sym]:     # don't push on when Yahoo has asked us to slow down
+                result[sym] = one(sym)
+        errors = [result[s] for s in symbols if result[s]]
+        quotes = [self.last[s] for s in symbols if s in self.last]
         if not quotes:
             raise UpstreamError(errors[0] if errors else "No stock prices yet")
         out = {"quotes": quotes, "updated": int(time.time()), "refresh": round(self.interval())}
         if errors:
             out["missing"] = errors[:5]
+        if len(errors) == len(symbols):          # every symbol failed this round: the prices shown are old, so say so
+            out["stale"], out["error"] = True, errors[0]
         return out
 
 
 class StockSource(Source):
+    """Prices take Yahoo about ten seconds for a handful of tickers, so the TV is never made to wait for them:
+    once there are prices, a stale answer is served at once and the refresh happens in the background."""
+
     def __init__(self, stocks: Stocks):
         super().__init__("stocks", stocks.interval(), stocks.fetch)
         self.stocks = stocks
+        self.refreshing = False
+
+    def _refresh(self) -> None:
+        try:
+            Source.get(self)
+        except UpstreamError:
+            pass                                # already recorded as the source's error
+        finally:
+            self.refreshing = False
 
     def get(self) -> dict:
         self.ttl = self.stocks.interval()
-        return super().get()
+        if self.data is None:
+            return super().get()                # the very first load has to wait
+        if time.time() - self.fetched_at >= self.ttl and not self.refreshing:
+            self.refreshing = True
+            threading.Thread(target=self._refresh, daemon=True).start()
+        out = dict(self.data)
+        if self.error:
+            out["stale"], out["error"] = True, self.error
+        return out
+
+
+# --------------------------------------------------------------------------
+# Home Assistant (locks, doors, cameras)
+# --------------------------------------------------------------------------
+
+def ha_kind(entity_id: str, attrs: dict | None) -> str:
+    domain = entity_id.split(".", 1)[0]
+    if domain in ("lock", "cover", "person"):
+        return domain
+    if domain == "alarm_control_panel":
+        return "alarm"
+    if domain == "binary_sensor":
+        dc = (attrs or {}).get("device_class")
+        if dc in ("door", "window", "garage_door", "opening"):
+            return "opening"
+        if dc in ("motion", "occupancy", "presence", "moving"):
+            return "motion"
+    return "other"
+
+
+def _span(minutes: int) -> str:
+    return f"{minutes} min" if minutes < 90 else f"{round(minutes / 60)} h"
+
+
+def ha_describe(kind: str, state: str, minutes: int, alert: int, attrs: dict | None = None) -> dict:
+    """What a tile says and how worried it should look: tone is good, warn, bad or neutral."""
+    tone, text, icon = "neutral", state.replace("_", " ").capitalize(), "dot"
+    dc = (attrs or {}).get("device_class")
+    if state in ("unavailable", "unknown", "missing"):
+        return {"text": "Unavailable", "tone": "neutral", "icon": "dot"}
+    late = bool(alert) and minutes >= alert
+    if kind == "lock":
+        table = {"locked": ("Locked", "good"), "unlocked": ("Unlocked", "bad"), "locking": ("Locking", "warn"),
+                 "unlocking": ("Unlocking", "warn"), "jammed": ("Jammed", "bad"), "open": ("Open", "bad"), "opening": ("Opening", "warn")}
+        text, tone = table.get(state, (text, "neutral"))
+        icon = "lock" if state in ("locked", "locking") else "unlock"
+        if state in ("unlocked", "open") and late:
+            text = f"{text} {_span(minutes)}"
+    elif kind in ("opening", "cover"):
+        is_open = state in ("on", "open", "opening", "closing")
+        icon = "garage" if dc in ("garage_door", "garage", "gate") else "window" if dc == "window" else "door"
+        text, tone = ("Open", "bad" if late else "warn") if is_open else ("Closed", "good")
+        if state in ("opening", "closing"):
+            text, tone = state.capitalize(), "warn"
+        elif is_open and late:
+            text = f"Open {_span(minutes)}"
+    elif kind == "alarm":
+        icon = "shield"
+        if state.startswith("armed_"):
+            text, tone = "Armed " + state[6:].replace("_", " "), "good"
+        elif state == "disarmed":
+            text, tone = "Off", "neutral"
+        elif state in ("arming", "pending"):
+            text, tone = state.capitalize(), "warn"
+        elif state == "triggered":
+            text, tone = "TRIGGERED", "bad"
+    elif kind == "person":
+        icon = "person"
+        text, tone = ("Home", "good") if state == "home" else ("Away", "neutral") if state == "not_home" else (state.replace("_", " ").title(), "neutral")
+    elif kind == "motion":
+        icon = "motion"
+        text, tone = ("Motion", "warn") if state == "on" else ("Clear", "neutral")
+    return {"text": text, "tone": tone, "icon": icon}
+
+
+class HomeAssistant:
+    """Reads Home Assistant's REST API with a long-lived token the server keeps to itself.
+    The TV never sees the token: pictures and states come through this server."""
+
+    def __init__(self, cfg: dict, tz: ZoneInfo):
+        self.cfg, self.tz = cfg, tz
+        self.lock = threading.Lock()
+        self.snaps: dict[str, tuple[float, bytes, str]] = {}
+        self.motion_since: dict[str, float] = {}
+        self.motion_last: dict[str, float] = {}
+
+    def _get(self, path: str, timeout: float = 8.0) -> bytes:
+        base, token = self.cfg.get("url", ""), self.cfg.get("token", "")
+        if not base or not token:
+            raise UpstreamError("Connect Home Assistant in Settings → Smart home")
+        try:
+            return http_request(base.rstrip("/") + path, headers={"Authorization": f"Bearer {token}"}, timeout=timeout)
+        except UpstreamError as e:
+            if "HTTP 401" in str(e):
+                raise UpstreamError("Home Assistant didn't accept the token. Make a new long-lived token in your Home Assistant profile.") from None
+            raise
+
+    def _json(self, path: str) -> Any:
+        try:
+            return json.loads(self._get(path))
+        except ValueError:
+            raise UpstreamError("Home Assistant sent something unexpected. Check the address.") from None
+
+    def check(self) -> str:
+        self._get("/api/")
+        cfg = self._json("/api/config")
+        return f"Connected to {cfg.get('location_name') or 'Home Assistant'} (Home Assistant {cfg.get('version', '?')})."
+
+    def entities(self) -> list:
+        """Everything worth putting on the TV: locks, doors, covers, the alarm, people, motion sensors and cameras."""
+        out = []
+        for st in self._json("/api/states"):
+            eid = st.get("entity_id", "")
+            attrs = st.get("attributes") or {}
+            domain = eid.split(".", 1)[0]
+            kind = "camera" if domain == "camera" else ha_kind(eid, attrs)
+            if not ENTITY_ID.match(eid) or kind == "other" or (domain == "binary_sensor" and kind not in ("opening", "motion")):
+                continue
+            out.append({"id": eid, "name": str(attrs.get("friendly_name") or eid)[:60], "domain": domain, "kind": kind,
+                        "state": str(st.get("state", ""))})
+        out.sort(key=lambda x: (x["kind"], x["name"].lower()))
+        return out[:600]
+
+    def _state(self, eid: str) -> dict | None:
+        try:
+            return self._json(f"/api/states/{eid}")
+        except UpstreamError as e:
+            if "HTTP 404" in str(e):
+                return None
+            raise
+
+    def status(self) -> dict:
+        """The status tiles: one line per chosen item, and a summary of whether anything needs attention."""
+        from concurrent.futures import ThreadPoolExecutor
+        ents = self.cfg.get("entities") or []
+        if not self.cfg.get("enabled") or not ents:
+            raise UpstreamError("No Home Assistant items are chosen. Add some in Settings → Smart home")
+        alert = int(self.cfg.get("alert_minutes", 10))
+        with ThreadPoolExecutor(max_workers=6) as pool:
+            states = list(pool.map(lambda e: self._state(e["id"]), ents))
+        now = dt.datetime.now(dt.timezone.utc)          # read after the states, so "for N minutes" never rounds down early
+        items = []
+        for e, st in zip(ents, states):
+            attrs = (st or {}).get("attributes") or {}
+            state = str((st or {}).get("state", "missing"))
+            minutes = 0
+            try:
+                changed = dt.datetime.fromisoformat(str(st["last_changed"]).replace("Z", "+00:00"))
+                minutes = max(int((now - changed).total_seconds() // 60), 0)
+            except (KeyError, TypeError, ValueError):
+                pass
+            kind = ha_kind(e["id"], attrs)
+            items.append({"id": e["id"], "name": e["name"] or str(attrs.get("friendly_name") or e["id"]), "kind": kind,
+                          "state": state, "minutes": minutes, **ha_describe(kind, state, minutes, alert, attrs)})
+        bad = [i for i in items if i["tone"] == "bad"]
+        secure_kinds = [i for i in items if i["kind"] in ("lock", "opening", "cover")]
+        if bad:
+            names = ", ".join(i["name"] for i in bad[:2]) + (f" and {len(bad) - 2} more" if len(bad) > 2 else "")
+            summary = {"text": f"Needs attention: {names}", "tone": "bad"}
+        elif any(i["tone"] == "warn" for i in secure_kinds):
+            summary = {"text": "Something is open", "tone": "warn"}
+        elif secure_kinds:
+            summary = {"text": "All secure", "tone": "good"}
+        else:
+            summary = {"text": "", "tone": "neutral"}
+        return {"items": items, "summary": summary, "updated": int(time.time())}
+
+    def cameras_state(self) -> dict:
+        """Which cameras have motion right now (or had it within the pop-up time), for the pop-up."""
+        cams = self.cfg.get("cameras") or []
+        if not self.cfg.get("enabled") or not cams:
+            raise UpstreamError("No cameras are chosen. Add some in Settings → Smart home")
+        grace = int(self.cfg["popup"]["seconds"])
+        now = time.time()
+        out = []
+        for cam in cams:
+            on = False
+            for sid in cam.get("motion") or []:
+                st = self._state(sid)
+                on = on or bool(st and st.get("state") == "on")
+            with self.lock:
+                if on:
+                    self.motion_since.setdefault(cam["id"], now)
+                    self.motion_last[cam["id"]] = now
+                active = on or (now - self.motion_last.get(cam["id"], 0) < grace and cam["id"] in self.motion_last)
+                if not active:
+                    self.motion_since.pop(cam["id"], None)
+                since = self.motion_since.get(cam["id"])
+            out.append({"id": cam["id"], "name": cam["name"] or cam["id"], "active": bool(active), "since": int(since) if since else None,
+                        "popup": bool(cam.get("popup", True))})
+        return {"cameras": out, "popup": bool(self.cfg["popup"]["enabled"]), "seconds": grace, "updated": int(now)}
+
+    def snapshot(self, camera_id: str) -> tuple[bytes, str]:
+        """A still picture from one of the chosen cameras, shared for a second so many viewers don't hammer the camera."""
+        if camera_id not in {c["id"] for c in (self.cfg.get("cameras") or [])} or not self.cfg.get("enabled"):
+            raise PermissionError("That camera isn't on the dashboard")
+        with self.lock:
+            hit = self.snaps.get(camera_id)
+        if hit and time.time() - hit[0] < 1.0:
+            return hit[1], hit[2]
+        blob = self._get(f"/api/camera_proxy/{camera_id}", timeout=10)
+        if len(blob) > 8_000_000:
+            raise UpstreamError("The camera's picture is too large")
+        ctype = "image/png" if blob[:4] == b"\x89PNG" else "image/jpeg"
+        with self.lock:
+            self.snaps[camera_id] = (time.time(), blob, ctype)
+        return blob, ctype
 
 
 VIRTUAL = re.compile(r"(https?://|zoom\.us|meet\.google|teams\.microsoft|webex)", re.I)
@@ -1266,11 +1607,14 @@ class App:
         self.calendars = Calendars(c["calendar"]["calendars"], self.tz, account=c["calendar"]["account"])
         self.maps_budget = MapsBudget(self.state_dir / "maps-usage.json", c["drive"].get("monthly_limit", 900), self.tz)
         self.drive = Drive(c["drive"], c["home"]["address"], self.tz, self.maps_budget)
+        self.ha = HomeAssistant(c["ha"], self.tz)
         self.sources = {
             "weather": Source("weather", c["tempest"].get("refresh_seconds", 120), self.weather.fetch),
             "calendar": Source("calendar", c["calendar"].get("refresh_seconds", 600), self.calendars.fetch),
             "drive": DriveSource(self.drive, c["drive"].get("refresh_seconds", 600)),
             "stocks": StockSource(Stocks(c["stocks"], self.tz)),
+            "home": Source("home", c["ha"].get("refresh_seconds", 10), self.ha.status),
+            "cameras": Source("cameras", 3, self.ha.cameras_state),     # polled by the TV, so only runs while it's watching
         }
         with self.route_lock:
             self.routes.clear()
@@ -1302,6 +1646,9 @@ class App:
                                           "wind": c["tempest"]["units"]["wind"],
                                           "precip": c["tempest"]["units"]["precip"]},
                 "home": c["home"]["label"], "version": self.store.version, "layout": c["layout"],
+                "ha": {"status": bool(c["ha"]["enabled"] and c["ha"]["entities"]),
+                       "cameras": bool(c["ha"]["enabled"] and c["ha"]["cameras"]),
+                       "popup": bool(c["ha"]["popup"]["enabled"])},
                 "stocks": {"enabled": bool(c["stocks"]["enabled"] and c["stocks"]["symbols"]),
                            "symbols": c["stocks"]["symbols"]}}
 
@@ -1417,27 +1764,24 @@ class App:
         return self.sleep_now()
 
     def stock_search(self, q: str) -> list:
-        """Look a company up by name or ticker, through Finnhub's search."""
-        st = self.config["stocks"]
+        """Look a company, fund or index up by name or ticker, through Yahoo's search."""
         q = " ".join(q.split())[:60]
         if len(q) < 2:
             return []
-        if not st.get("api_key"):
-            raise UpstreamError("Save a Finnhub key first (Settings → Stocks)")
-        url = f"{st.get('search_url', FINNHUB_SEARCH)}?{urllib.parse.urlencode({'q': q, 'token': st['api_key']})}"
-        raw = http_json(url, timeout=10)
-        if not isinstance(raw, dict) or "error" in raw:
-            raise UpstreamError(f"Finnhub: {raw.get('error') if isinstance(raw, dict) else 'unexpected answer'}")
+        try:
+            found = load_yfinance().Search(q, max_results=20, news_count=0).quotes
+        except Exception:  # noqa: BLE001 — a network or Yahoo problem, whatever its type
+            raise UpstreamError("Yahoo's search isn't answering right now. Try again in a moment.") from None
+        kinds = {"EQUITY": "Stock", "ETF": "ETF", "MUTUALFUND": "Mutual fund", "INDEX": "Index", "CRYPTOCURRENCY": "Crypto"}
         out = []
-        for r in (raw.get("result") or [])[:50]:
+        for r in found or []:
             sym = str(r.get("symbol") or "").upper()
-            if not SYMBOL.match(sym):
+            kind = kinds.get(str(r.get("quoteType") or ""))
+            if not kind or not SYMBOL.match(sym):               # futures, options and the like are noise on a ticker bar
                 continue
-            kind = str(r.get("type") or "")
-            # Finnhub's free plan prices US stocks and ETFs; foreign exchanges (SAP.DE) and mutual funds need a paid plan
-            free = (("." not in sym) or re.search(r"\.[AB]$", sym) is not None) and "fund" not in kind.lower()
-            out.append({"symbol": sym, "name": str(r.get("description") or "")[:80], "type": kind[:30], "free": free})
-        out.sort(key=lambda x: (not x["free"], len(x["symbol"])))
+            where = str(r.get("exchDisp") or r.get("exchange") or "")
+            out.append({"symbol": sym, "name": str(r.get("shortname") or r.get("longname") or "")[:80],
+                        "type": f"{kind} · {where}" if where else kind})
         return out[:20]
 
     def info(self) -> dict:
@@ -1505,12 +1849,14 @@ class App:
                 found = [p for p in res["places"] if p["status"] == "ok"]
                 return {"ok": bool(found), "message": f"Connected. Found routes to {len(found)} of {len(places)} places."
                         if found else "Google answered, but found no route. Check the addresses."}
+            if kind == "ha":
+                return {"ok": True, "message": HomeAssistant(c["ha"], tz).check()}
             if kind == "stocks":
                 st = Stocks({**c["stocks"], "enabled": True}, tz)
-                if not st.cfg.get("api_key") or not st.cfg.get("symbols"):
-                    return {"ok": False, "message": "Add a Finnhub key and at least one ticker first."}
-                q = st.quote(st.cfg["symbols"][0])
-                return {"ok": True, "message": f"Connected. {q['symbol']} is {q['price']:,.2f} ({q['percent']:+.2f}%)."}
+                if not st.cfg.get("symbols"):
+                    return {"ok": False, "message": "Add at least one ticker first."}
+                q = st.quote(normalize_symbol(st.cfg["symbols"][0]))
+                return {"ok": True, "message": f"Yahoo answered. {q['label']} is {q['price']:,.2f} ({q['percent']:+.2f}%)."}
         except (UpstreamError, ValueError) as e:
             return {"ok": False, "message": str(e)}
         raise ValueError("Unknown test")
@@ -1620,6 +1966,9 @@ def make_handler(app: App):
             if path.startswith("/api/") or path == "/healthz" or path.startswith("/photos/"):
                 if not (self.tv() or self.admin() or app.config["display"]["shareOnNetwork"]):
                     return self._json(401, {"error": "Sign in at /admin to view the dashboard from this device."})
+                # Lock states and camera pictures are for the TV and the settings only, never "Others can view"
+                if (path in ("/api/home", "/api/cameras") or path.startswith("/api/ha/")) and not (self.tv() or self.admin()):
+                    return self._json(401, {"error": "Only the TV or a signed-in settings session can see this."})
                 return self.api_get(path, q)
             return self.static(path)
 
@@ -1648,6 +1997,16 @@ def make_handler(app: App):
                 if not p:
                     return self._json(404, {"error": "No such photo"})
                 return self._send(200, p.read_bytes(), PHOTO_TYPES[p.suffix.lower()], "public, max-age=86400")
+            if path.startswith("/api/ha/camera/"):
+                cid = urllib.parse.unquote(path[len("/api/ha/camera/"):])
+                cid = cid[:-4] if cid.endswith(".jpg") else cid
+                try:
+                    blob, ctype = app.ha.snapshot(cid)
+                except PermissionError as e:
+                    return self._json(404, {"error": str(e)})
+                except UpstreamError as e:
+                    return self._json(502, {"error": str(e)})
+                return self._send(200, blob, ctype)
             name = path[5:]
             if name == "config":
                 return self._json(200, app.display_config())
@@ -1716,6 +2075,11 @@ def make_handler(app: App):
                 stamp = dt.datetime.now(app.tz).strftime("%Y-%m-%d")
                 return self._send(200, blob, "application/gzip",
                                   headers={"Content-Disposition": f'attachment; filename="family-dashboard-backup-{stamp}.tar.gz"'})
+            if name == "ha/entities":
+                try:
+                    return self._json(200, {"entities": app.ha.entities()})
+                except UpstreamError as e:
+                    return self._json(502, {"error": str(e)})
             if name == "stocks/search":
                 try:
                     return self._json(200, {"results": app.stock_search((q or {}).get("q", [""])[0])})
@@ -1839,12 +2203,18 @@ def make_handler(app: App):
     return Handler
 
 
+def warm_names(app: "App") -> list:
+    """The feeds worth keeping fresh in the background, so the TV and the settings never wait for them."""
+    c = app.config
+    return (["weather", "calendar"] + (["drive"] if c["screen"]["mode"] == "dashboard" else [])
+            + (["stocks"] if c["stocks"]["enabled"] and c["stocks"]["symbols"] else []))
+
+
 def keep_warm(app: App) -> None:
     """Refresh in the background so the TV and the settings page always have
     current data. Drive times are only paid for while the TV shows this dashboard."""
     while True:
-        names = ["weather", "calendar"] + (["drive"] if app.config["screen"]["mode"] == "dashboard" else [])
-        for name in names:
+        for name in warm_names(app):
             try:
                 app.sources[name].get()
             except Exception:  # noqa: BLE001 — already logged and shown in status

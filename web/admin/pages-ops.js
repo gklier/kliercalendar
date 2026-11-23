@@ -118,7 +118,7 @@ sudo reboot</code></pre>
           <tr><td>Calendars</td><td>Google Calendar over CalDAV, plus any secret iCal links</td><td>A Google app password (a full-account secret: it can reach mail too)</td><td>Server every 10 min; a failing calendar doesn't hide the others</td></tr>
           <tr><td>Weather</td><td>Tempest weather station (WeatherFlow)</td><td>Station token</td><td>Every 2 min</td></tr>
           <tr><td>Drive times, leave-by</td><td>Google Maps Routes API (route matrix and directions)</td><td>API key restricted to Routes</td><td>Paced by a monthly limit (900 reads by default), spread evenly over the days left</td></tr>
-          <tr><td>Stock prices, search</td><td>Finnhub quote and search</td><td>Free API key (60 requests a minute)</td><td>15 s while US markets are open, else 15 min; slows itself to stay under the limit</td></tr>
+          <tr><td>Stock prices, search</td><td>Yahoo Finance, through the <code>yfinance</code> package (unofficial; may be delayed)</td><td>None</td><td>30 s while US markets are open, else 15 min; one request per ticker, so it slows down with many</td></tr>
           <tr><td>Sunrise, sunset</td><td>The weather forecast</td><td>none</td><td>With the weather</td></tr>
         </tbody></table></div>
       <p class="hint" style="margin-left:0">Every source is cached with "stale on error": if an outside service fails, the last good data stays on the TV with a small "offline since" note, and the server backs off for a minute before trying again.</p>
@@ -158,7 +158,7 @@ sudo reboot</code></pre>
         ${row("Restart the TV", "<code>sudo systemctl restart family-tv</code> on the Pi, or <b>Reload the TV</b> on the first settings page.")}
         ${row("Update", `Rebuild the image from the repository (<a href="${esc(REPO)}">${esc(REPO.replace("https://", ""))}</a>) and recreate the container. The data folder is untouched. In Portainer, deploy the stack from the repository and use "Pull and redeploy".`)}
         ${row("Back up", "The server's data folder. See <a href=\"#backup\">Backup</a>.")}
-        ${row("Network", "Inbound: TCP " + esc(i.port || 8080) + " from the TV and browsers. Outbound HTTPS from the server to Google (Calendar and Maps), WeatherFlow and Finnhub. The TV needs only the server (and DAKboard if used as a fallback).")}
+        ${row("Network", "Inbound: TCP " + esc(i.port || 8080) + " from the TV and browsers. Outbound HTTPS from the server to Google (Calendar and Maps), WeatherFlow and Yahoo Finance. The TV needs only the server (and DAKboard if used as a fallback).")}
       </tbody></table></div>
 
       <h2>When something looks wrong</h2>
@@ -182,7 +182,7 @@ sudo reboot</code></pre>
       ${box(10, 20, 190, 56, "Google Calendar", ["CalDAV, app password"])}
       ${box(10, 94, 190, 56, "Google Maps", ["Routes API, monthly limit"])}
       ${box(10, 168, 190, 56, "Tempest weather", ["WeatherFlow API"])}
-      ${box(10, 242, 190, 56, "Finnhub", ["quotes and search"])}
+      ${box(10, 242, 190, 56, "Yahoo Finance", ["quotes and search, no key"])}
       ${box(290, 60, 230, 190, "Dashboard server", ["one container, Python", "caches every source", "keeps all keys private", "/data: settings, photos,", "usage counters"], "core")}
       ${box(580, 30, 195, 96, "The TV", ["Raspberry Pi, cage + Chromium", "launcher polls the server"])}
       ${box(580, 170, 195, 70, "Browsers", ["settings at /admin/"])}

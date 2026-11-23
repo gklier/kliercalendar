@@ -68,6 +68,72 @@ def tempest_fixture() -> dict:
     }
 
 
+class FakeYahoo:
+    """Stands in for the yfinance package, so the tests need no network (or pandas)."""
+    PRICES = {"AAPL": (230.1, 227.48), "SPY": (590.0, 597.4), "BRK-B": (570.0, 571.72), "^IXIC": (22617.73, 23882.10),
+              "AIVSX": (60.72, 63.25), "BTC-USD": (61134.67, 60086.0)}
+    calls: list = []
+    rate_limited = False
+    gate = None                    # a threading.Event the fake waits on, to play a slow Yahoo
+    flaky: dict = {}               # symbol -> how many times it fails before it works, like a cold-start hiccup
+
+    class Ticker:
+        def __init__(self, sym):
+            self.sym = sym
+
+        @property
+        def fast_info(self):
+            FakeYahoo.calls.append(self.sym)
+            if FakeYahoo.gate is not None:
+                FakeYahoo.gate.wait(5)
+            if FakeYahoo.flaky.get(self.sym, 0) > 0:
+                FakeYahoo.flaky[self.sym] -= 1
+                raise OSError("connection reset")
+            if FakeYahoo.rate_limited:
+                raise type("YFRateLimitError", (Exception,), {})("Too Many Requests")
+            if self.sym not in FakeYahoo.PRICES:
+                raise KeyError("currentTradingPeriod")         # what yfinance does for a symbol that doesn't exist
+            last, prev = FakeYahoo.PRICES[self.sym]
+            return {"lastPrice": last, "previousClose": prev}
+
+    class Search:
+        def __init__(self, q, max_results=8, news_count=0):
+            rows = [("AAPL", "Apple Inc.", "EQUITY", "NASDAQ"), ("SAAPL=F", "Apple Inc Stock Futures", "FUTURE", "CME"),
+                    ("APLE", "Apple Hospitality REIT, Inc.", "EQUITY", "NYSE"), ("VFIAX", "Vanguard 500 Index Fd Admiral", "MUTUALFUND", "Nasdaq"),
+                    ("^IXIC", "NASDAQ Composite", "INDEX", "Nasdaq GIDS"), ("not a ticker!", "junk", "EQUITY", ""),
+                    ("BTC-USD", "Bitcoin USD", "CRYPTOCURRENCY", "CCC")]
+            self.quotes = [{"symbol": a, "shortname": b, "quoteType": c, "exchDisp": d} for a, b, c, d in rows]
+
+
+def use_fake_yahoo():
+    real = server.load_yfinance
+    server.load_yfinance = lambda: FakeYahoo
+    FakeYahoo.calls, FakeYahoo.rate_limited = [], False
+    return real
+
+
+HA_TOKEN = "ha-test-token-abcdefghijklmnopqrstuvwxyz"
+HA_JPEG = b"\xff\xd8\xff\xe0fake-camera-picture"
+
+
+def ha_states():
+    ago = lambda m: (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=m)).isoformat().replace("+00:00", "Z")
+    rows = [
+        ("lock.front_door", "locked", {"friendly_name": "Front Door"}, 300),
+        ("lock.back_door", "unlocked", {"friendly_name": "Back Door"}, 20),
+        ("binary_sensor.garage_door", "on", {"friendly_name": "Garage Door", "device_class": "garage_door"}, 20),
+        ("cover.side_gate", "closed", {"friendly_name": "Side Gate", "device_class": "gate"}, 500),
+        ("person.alex", "home", {"friendly_name": "Alex"}, 60),
+        ("person.sam", "not_home", {"friendly_name": "Sam"}, 60),
+        ("alarm_control_panel.house", "armed_home", {"friendly_name": "House Alarm"}, 100),
+        ("camera.front", "idle", {"friendly_name": "Front Camera"}, 5),
+        ("binary_sensor.front_motion", Upstream.ha_motion, {"friendly_name": "Front Motion", "device_class": "motion"}, 1),
+        ("binary_sensor.washer", "on", {"friendly_name": "Washer", "device_class": "running"}, 5),
+        ("sensor.temp", "21", {"friendly_name": "Temperature"}, 5),
+    ]
+    return {eid: {"entity_id": eid, "state": st, "attributes": at, "last_changed": ago(m)} for eid, st, at, m in rows}
+
+
 DAV_HOME = "/calendar/dav/parent%40example.com/user/"
 
 
@@ -78,6 +144,7 @@ def multistatus(*responses):
 
 class Upstream(BaseHTTPRequestHandler):
     posts = []
+    ha_motion = "off"
     fail_tempest = False
     dav_calendars = ["family", "work"]
 
@@ -101,20 +168,22 @@ class Upstream(BaseHTTPRequestHandler):
             return self._reply(200, ics_fixture().encode(), "text/calendar")
         if self.path == "/notcal.ics":
             return self._reply(200, b"<html>Sign in</html>", "text/html")
-        if self.path.startswith("/search"):
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            assert q["token"] == ["FINN"]
-            rows = [("APPLE INC", "AAPL", "Common Stock"), ("APPLE HOSPITALITY REIT", "APLE", "REIT"),
-                    ("APPLE INC", "APC.DE", "Common Stock"), ("AMERICAN FUNDS INVESTMENT CO OF AMERICA A", "AIVSX", "Open-End Fund"),
-                    ("BERKSHIRE HATHAWAY INC-CL B", "BRK.B", "Common Stock"), ("junk", "not a ticker!", "")]
-            return self._reply(200, json.dumps({"count": len(rows), "result": [
-                {"description": d, "displaySymbol": sy, "symbol": sy, "type": t} for d, sy, t in rows]}).encode())
-        if self.path.startswith("/finnhub"):
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            assert q["token"] == ["FINN"]
-            quotes = {"AAPL": {"c": 230.1, "d": 2.62, "dp": 1.1517, "pc": 227.48, "t": 1},
-                      "SPY": {"c": 590.0, "d": -7.4, "dp": -1.2387, "pc": 597.4, "t": 1}}
-            return self._reply(200, json.dumps(quotes.get(q["symbol"][0], {"c": 0, "d": None, "dp": None, "pc": 0})).encode())
+        if self.path.startswith("/ha/"):
+            if self.headers.get("Authorization") != f"Bearer {HA_TOKEN}":
+                return self._reply(401, b'{"message": "401: Unauthorized"}')
+            path = self.path[3:]
+            if path == "/api/":
+                return self._reply(200, b'{"message": "API running."}')
+            if path == "/api/config":
+                return self._reply(200, json.dumps({"location_name": "Test House", "version": "2026.11.0"}).encode())
+            if path == "/api/states":
+                return self._reply(200, json.dumps(list(ha_states().values())).encode())
+            if path.startswith("/api/states/"):
+                st = ha_states().get(path[len("/api/states/"):])
+                return self._reply(200, json.dumps(st).encode()) if st else self._reply(404, b'{"message": "Entity not found."}')
+            if path.startswith("/api/camera_proxy/"):
+                return self._reply(200, HA_JPEG, "image/jpeg")
+            return self._reply(404, b"{}")
         self._reply(404, b"{}")
 
     def _dav_auth(self):
@@ -356,19 +425,102 @@ class DashboardTest(unittest.TestCase):
 
     def test_stocks(self):
         before = server.copy.deepcopy(self.app.config)
-        self.app.save(server.apply_settings(before, {"stocks": {"enabled": True, "api_key": "FINN", "symbols": "aapl, $SPY zzzz"}}))
-        self.app.config["stocks"]["base_url"] = f"http://127.0.0.1:{self.up.server_port}/finnhub"
+        real = use_fake_yahoo()
+        self.app.save(server.apply_settings(before, {"stocks": {"enabled": True, "symbols": "aapl, $SPY zzzz brk.b nasdaq"}}))
         try:
+            self.assertEqual(self.app.config["stocks"]["symbols"], ["AAPL", "SPY", "ZZZZ", "BRK-B", "^IXIC"])   # typed the way people type
             s, st = Client(self.base).call("/api/stocks")
             self.assertEqual(s, 200, st)
-            self.assertEqual([q["symbol"] for q in st["quotes"]], ["AAPL", "SPY"])  # ZZZZ has no price: left out
-            aapl, spy = st["quotes"]
+            self.assertEqual([q["symbol"] for q in st["quotes"]], ["AAPL", "SPY", "BRK-B", "^IXIC"])   # ZZZZ doesn't exist: left out
+            aapl, spy, brk, nasdaq = st["quotes"]
             self.assertEqual((aapl["price"], aapl["change"], aapl["percent"]), (230.1, 2.62, 1.15))
             self.assertLess(spy["percent"], 0)
+            self.assertEqual((nasdaq["label"], brk["label"]), ("Nasdaq", "BRK-B"))
             self.assertIn("ZZZZ", st["missing"][0])
-            self.assertEqual(Client(self.base).call("/api/config")[1]["stocks"], {"enabled": True, "symbols": ["AAPL", "SPY", "ZZZZ"]})
-            settings = self.signed_in().call("/admin/api/settings")[1]
-            self.assertNotIn("FINN", json.dumps(settings))
+            self.assertEqual(Client(self.base).call("/api/config")[1]["stocks"], {"enabled": True, "symbols": ["AAPL", "SPY", "ZZZZ", "BRK-B", "^IXIC"]})
+            # Yahoo limiting us keeps the last prices on the bar instead of emptying it
+            FakeYahoo.rate_limited = True
+            src = self.app.sources["stocks"]
+            src.fetched_at = 0
+            src.error_at = 0
+            Client(self.base).call("/api/stocks")                      # starts the refresh in the background, answers with the old prices
+            for _ in range(50):
+                if not src.refreshing:
+                    break
+                time.sleep(0.1)
+            again = Client(self.base).call("/api/stocks")[1]
+            self.assertTrue(again["stale"])
+            self.assertIn("limiting", again["error"])
+            self.assertEqual(len(again["quotes"]), 4)
+            # The Test button
+            FakeYahoo.rate_limited = False
+            ok = self.signed_in().call("/admin/api/test/stocks", {})[1]
+            self.assertTrue(ok["ok"], ok)
+            self.assertIn("Yahoo answered", ok["message"])
+        finally:
+            server.load_yfinance = real
+            FakeYahoo.rate_limited = False
+            self.app.save(before)
+
+    def test_stock_hiccups_are_retried_in_the_same_round(self):
+        real = use_fake_yahoo()
+        FakeYahoo.flaky = {"SPY": 1}                      # fails once, like Yahoo's cookie race on a cold start
+        try:
+            out = server.Stocks({"enabled": True, "symbols": ["AAPL", "SPY", "ZZZZ"]}, None).fetch()
+            self.assertEqual([q["symbol"] for q in out["quotes"]], ["AAPL", "SPY"])      # SPY made it into the first round
+            self.assertEqual(FakeYahoo.calls.count("SPY"), 2)
+            self.assertEqual(FakeYahoo.calls.count("ZZZZ"), 2)                            # a symbol that doesn't exist: tried twice, then left out
+            self.assertEqual(FakeYahoo.calls[0], "AAPL")                                  # the session is set up by one request first
+            FakeYahoo.calls.clear()
+            FakeYahoo.rate_limited = True
+            out = server.Stocks({"enabled": True, "symbols": ["AAPL"]}, None)
+            with self.assertRaises(server.UpstreamError):
+                out.fetch()
+            self.assertEqual(FakeYahoo.calls, ["AAPL"])                                   # no second try when Yahoo says slow down
+        finally:
+            FakeYahoo.flaky, FakeYahoo.rate_limited = {}, False
+            server.load_yfinance = real
+
+    def test_stock_prices_never_make_the_tv_wait(self):
+        import threading
+        before = server.copy.deepcopy(self.app.config)
+        real = use_fake_yahoo()
+        original = FakeYahoo.PRICES["AAPL"]
+        try:
+            self.app.save(server.apply_settings(before, {"stocks": {"enabled": True, "symbols": "AAPL"}}))
+            self.assertIn("stocks", server.warm_names(self.app))               # warmed in the background from the start
+            src = self.app.sources["stocks"]
+            first = Client(self.base).call("/api/stocks")[1]
+            self.assertEqual(first["quotes"][0]["price"], 230.1)
+            FakeYahoo.PRICES["AAPL"] = (231.0, 227.48)                        # Yahoo has a new price, but is slow to say so
+            FakeYahoo.gate = threading.Event()
+            src.fetched_at = 0                                                 # the cached prices are now out of date
+            t = time.time()
+            old = Client(self.base).call("/api/stocks")[1]
+            self.assertLess(time.time() - t, 2.0)                              # answered at once...
+            self.assertEqual(old["quotes"][0]["price"], 230.1)                 # ...with the last prices
+            FakeYahoo.gate.set()
+            for _ in range(50):
+                if not src.refreshing:
+                    break
+                time.sleep(0.1)
+            self.assertEqual(Client(self.base).call("/api/stocks")[1]["quotes"][0]["price"], 231.0)   # the background refresh landed
+        finally:
+            FakeYahoo.gate = None
+            FakeYahoo.PRICES["AAPL"] = original
+            server.load_yfinance = real
+            self.app.save(before)
+
+    def test_old_finnhub_key_is_dropped_and_never_sent(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        legacy = server.copy.deepcopy(before)
+        legacy["stocks"]["api_key"] = "OLD-FINNHUB-KEY"
+        try:
+            self.app.save(legacy)
+            self.assertNotIn("OLD-FINNHUB-KEY", json.dumps(c.call("/admin/api/settings")[1]))   # even before it is cleaned up
+            c.call("/admin/api/settings", {"stocks": {"enabled": False}})
+            self.assertNotIn("api_key", self.app.config["stocks"])                               # the next save removes it
         finally:
             self.app.save(before)
 
@@ -395,22 +547,18 @@ class DashboardTest(unittest.TestCase):
 
     def test_stock_search(self):
         c = self.signed_in()
-        before = server.copy.deepcopy(self.app.config)
-        s, err = c.call("/admin/api/stocks/search?q=apple")
-        self.assertEqual(s, 502)
-        self.assertIn("Finnhub key", err["error"])
-        self.app.save(server.apply_settings(before, {"stocks": {"api_key": "FINN"}}))
-        self.app.config["stocks"]["search_url"] = f"http://127.0.0.1:{self.up.server_port}/search"
+        real = use_fake_yahoo()
         try:
             s, res = c.call("/admin/api/stocks/search?q=apple")
             self.assertEqual(s, 200, res)
-            got = [(r["symbol"], r["free"]) for r in res["results"]]
-            self.assertEqual(got, [("AAPL", True), ("APLE", True), ("BRK.B", True), ("AIVSX", False), ("APC.DE", False)])
-            self.assertEqual(res["results"][0]["name"], "APPLE INC")
-            self.assertEqual(c.call("/admin/api/stocks/search?q=a")[1]["results"], [])   # too short to ask Finnhub
+            got = [(r["symbol"], r["type"]) for r in res["results"]]
+            self.assertEqual(got, [("AAPL", "Stock · NASDAQ"), ("APLE", "Stock · NYSE"), ("VFIAX", "Mutual fund · Nasdaq"),
+                                   ("^IXIC", "Index · Nasdaq GIDS"), ("BTC-USD", "Crypto · CCC")])   # futures and junk are left out
+            self.assertEqual(res["results"][0]["name"], "Apple Inc.")
+            self.assertEqual(c.call("/admin/api/stocks/search?q=a")[1]["results"], [])               # too short to ask Yahoo
             self.assertEqual(Client(self.base).call("/admin/api/stocks/search?q=apple")[0], 401)
         finally:
-            self.app.save(before)
+            server.load_yfinance = real
 
     def test_schedule_save_does_not_reload_the_tv(self):
         c = self.signed_in()
@@ -436,6 +584,127 @@ class DashboardTest(unittest.TestCase):
             self.assertIn("family-dashboard-backup-", r.headers["Content-Disposition"])
             names = tarfile.open(fileobj=io.BytesIO(r.read()), mode="r:gz").getnames()
         self.assertIn("data/config.json", names)
+
+    # --- Home Assistant (against a fake one)
+
+    def ha_url(self):
+        return f"http://127.0.0.1:{self.up.server_port}/ha"
+
+    def ha_connect(self, c, **extra):
+        s, res = c.call("/admin/api/settings", {"ha": {"enabled": True, "url": self.ha_url(), "token": HA_TOKEN, **extra}})
+        self.assertEqual(s, 200, res)
+
+    def test_ha_connection_and_entities(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        try:
+            self.ha_connect(c)
+            ok = c.call("/admin/api/test/ha", {})[1]
+            self.assertTrue(ok["ok"], ok)
+            self.assertIn("Test House", ok["message"])
+            bad = c.call("/admin/api/test/ha", {"ha": {"token": "wrong-token-wrong-token-wrong"}})[1]
+            self.assertFalse(bad["ok"])
+            self.assertIn("didn't accept", bad["message"])
+
+            s, res = c.call("/admin/api/ha/entities")
+            self.assertEqual(s, 200, res)
+            by = {e["id"]: e for e in res["entities"]}
+            self.assertEqual(by["lock.front_door"]["kind"], "lock")
+            self.assertEqual(by["binary_sensor.garage_door"]["kind"], "opening")
+            self.assertEqual(by["binary_sensor.front_motion"]["kind"], "motion")
+            self.assertEqual(by["camera.front"]["kind"], "camera")
+            self.assertEqual(by["alarm_control_panel.house"]["kind"], "alarm")
+            for noise in ("sensor.temp", "binary_sensor.washer"):
+                self.assertNotIn(noise, by)                       # only things worth a tile are offered
+            self.assertEqual(Client(self.base).call("/admin/api/ha/entities")[0], 401)
+
+            shown = c.call("/admin/api/settings")[1]
+            self.assertNotIn(HA_TOKEN, json.dumps(shown))         # the token is never sent back to a browser
+            self.assertTrue(shown["ha"]["token"]["set"])
+            self.assertTrue(self.app.config["ha"]["token"])
+            # Pointing at a different Home Assistant drops the old token
+            c.call("/admin/api/settings", {"ha": {"url": "http://elsewhere.example:8123"}})
+            self.assertEqual(self.app.config["ha"]["token"], "")
+        finally:
+            self.app.save(before)
+
+    def test_ha_status_tiles(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        tiles = [{"id": i, "name": n} for i, n in [
+            ("lock.front_door", "Front door"), ("lock.back_door", "Back door"), ("binary_sensor.garage_door", "Garage"),
+            ("cover.side_gate", "Side gate"), ("person.alex", "Alex"), ("person.sam", "Sam"), ("alarm_control_panel.house", "Alarm"),
+            ("lock.gone", "Removed lock")]]
+        try:
+            self.ha_connect(c, entities=tiles, alert_minutes=10)
+            s, st = Client(self.base).call("/api/home")
+            self.assertEqual(s, 200, st)
+            it = {i["id"]: i for i in st["items"]}
+            self.assertEqual((it["lock.front_door"]["text"], it["lock.front_door"]["tone"]), ("Locked", "good"))
+            self.assertEqual((it["lock.back_door"]["text"], it["lock.back_door"]["tone"]), ("Unlocked 20 min", "bad"))
+            self.assertEqual((it["binary_sensor.garage_door"]["text"], it["binary_sensor.garage_door"]["icon"]), ("Open 20 min", "garage"))
+            self.assertEqual(it["cover.side_gate"]["tone"], "good")
+            self.assertEqual((it["person.alex"]["text"], it["person.sam"]["text"]), ("Home", "Away"))
+            self.assertEqual(it["alarm_control_panel.house"]["text"], "Armed home")
+            self.assertEqual(it["lock.gone"]["text"], "Unavailable")          # an item deleted in Home Assistant doesn't break the rest
+            self.assertEqual(st["summary"]["tone"], "bad")
+            self.assertIn("Back door", st["summary"]["text"])
+            # With the long-open alert off the garage is just "open"; an unlocked door is still a problem
+            self.ha_connect(c, alert_minutes=0)
+            it = {i["id"]: i for i in Client(self.base).call("/api/home")[1]["items"]}
+            self.assertEqual((it["binary_sensor.garage_door"]["text"], it["binary_sensor.garage_door"]["tone"]), ("Open", "warn"))
+            self.assertEqual(it["lock.back_door"]["text"], "Unlocked")
+        finally:
+            self.app.save(before)
+
+    def test_ha_snapshots_and_privacy(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        cams = [{"id": "camera.front", "name": "Front", "motion": ["binary_sensor.front_motion"]}]
+        real = server.is_loopback
+        try:
+            self.ha_connect(c, cameras=cams, entities=[{"id": "lock.front_door", "name": "Front door"}])
+            s, blob = Client(self.base).call("/api/ha/camera/camera.front.jpg")
+            self.assertEqual((s, blob), (200, HA_JPEG))
+            self.assertEqual(Client(self.base).call("/api/ha/camera/camera.other.jpg")[0], 404)   # only chosen cameras are proxied
+            self.assertEqual(Client(self.base).call("/api/ha/camera/..%2F..%2Fconfig.jpg")[0], 404)
+            # From another machine: the TV key or a settings session, never "Others can view"
+            server.is_loopback = lambda ip: False
+            self.app.config["display"]["shareOnNetwork"] = True
+            anyone = Client(self.base)
+            self.assertEqual(anyone.call("/api/weather")[0], 200)                        # ordinary feeds follow that setting
+            for path in ("/api/home", "/api/cameras", "/api/ha/camera/camera.front.jpg"):
+                self.assertEqual(anyone.call(path)[0], 401, path)
+                self.assertEqual(c.call(path)[0], 200, path)
+        finally:
+            server.is_loopback = real
+            self.app.config["display"]["shareOnNetwork"] = False
+            self.app.save(before)
+
+    def test_ha_motion_popup(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        cams = [{"id": "camera.front", "name": "Front", "motion": ["binary_sensor.front_motion"], "popup": True}]
+        again = lambda: (setattr(self.app.sources["cameras"], "fetched_at", 0), Client(self.base).call("/api/cameras")[1])[1]
+        try:
+            self.ha_connect(c, cameras=cams, popup={"enabled": True, "seconds": 5})
+            Upstream.ha_motion = "off"
+            self.assertFalse(again()["cameras"][0]["active"])
+            Upstream.ha_motion = "on"
+            res = again()
+            self.assertTrue(res["cameras"][0]["active"])
+            self.assertTrue(res["popup"])
+            self.assertIsNotNone(res["cameras"][0]["since"])
+            Upstream.ha_motion = "off"
+            self.assertTrue(again()["cameras"][0]["active"])                          # stays up for the pop-up time
+            self.app.ha.motion_last["camera.front"] -= 100                           # ...then goes away
+            res = again()
+            self.assertFalse(res["cameras"][0]["active"])
+            self.assertIsNone(res["cameras"][0]["since"])
+            self.assertEqual(Client(self.base).call("/api/config")[1]["ha"], {"status": False, "cameras": True, "popup": True})
+        finally:
+            Upstream.ha_motion = "off"
+            self.app.save(before)
 
     def test_status_has_info_for_the_about_page(self):
         st = self.signed_in().call("/admin/api/status")[1]
@@ -731,6 +1000,7 @@ class SettingsValidationTest(unittest.TestCase):
         self.bad({"photos": {"folder": "relative/path"}}, "full path")
         self.bad({"stocks": {"symbols": ["AAPL", "rm -rf"]}}, "ticker")
         self.bad({"stocks": {"symbols": [f"T{i}" for i in range(31)]}}, "30")
+        self.bad({"stocks": {"refresh_seconds": 5}}, "Stock refresh")
         self.bad({"drive": {"monthly_limit": -1}}, "Monthly")
         self.bad({"schedule": {"rules": [{"days": [], "off": "22:00", "on": "06:45"}]}}, "at least one day")
         self.bad({"schedule": {"rules": [{"days": [7], "off": "22:00", "on": "06:45"}]}}, "at least one day")
@@ -755,6 +1025,47 @@ class SettingsValidationTest(unittest.TestCase):
         r = c["schedule"]["rules"][0]
         self.assertEqual((r["days"], r["enabled"], len(r["id"]) >= 1), ([4, 5], True, True))
         self.assertEqual((c["display"]["bgColor"], c["display"]["bgGradient"]["angle"], c["display"]["bgPhoto"]), ("#0B1626", 45, "a1.jpg"))
+
+    def test_home_assistant_settings_are_checked(self):
+        self.bad({"ha": {"url": "ftp://x"}}, "http")
+        self.bad({"ha": {"token": "short"}}, "long-lived")
+        self.bad({"ha": {"entities": [{"id": "light.kitchen"}]}}, "can't be shown")
+        self.bad({"ha": {"entities": [{"id": "Lock.Front"}]}}, "isn't a Home Assistant item")
+        self.bad({"ha": {"entities": [{"id": "lock.a"}] * 25}}, "24")
+        self.bad({"ha": {"cameras": [{"id": "lock.front_door"}]}}, "can't be shown")
+        self.bad({"ha": {"cameras": [{"id": f"camera.c{i}"} for i in range(9)]}}, "8")
+        self.bad({"ha": {"cameras": [{"id": "camera.a", "motion": ["lock.x"]}]}}, "can't be shown")
+        self.bad({"ha": {"cameras": [{"id": "camera.a", "motion": ["binary_sensor.a"] * 4}]}}, "3 motion")
+        self.bad({"ha": {"popup": {"seconds": 1}}}, "Pop-up time")
+        self.bad({"layout": {"widgets": [{"type": "camera", "x": 0, "y": 0, "w": 400, "h": 200, "options": {"camera": "lock.x"}}]}}, "camera from the list")
+        c = server.apply_settings(self.base, {"ha": {"url": "http://ha.example:8123/", "token": "x" * 40,
+                                                      "cameras": [{"id": "camera.a", "name": "A", "motion": ["binary_sensor.m"]}]}})
+        self.assertEqual((c["ha"]["url"], c["ha"]["cameras"][0]["popup"]), ("http://ha.example:8123", True))
+        self.assertEqual(server.apply_settings(c, {"ha": {"url": "http://other.example:8123"}})["ha"]["token"], "")
+
+    def test_ticker_names_are_what_yahoo_calls_them(self):
+        n = server.normalize_symbol
+        self.assertEqual([n(x) for x in ("aapl", "$MSFT", "BRK.B", "bf.b", "NASDAQ", "SP500", "^gspc", "SAP.DE", "BTC-USD", "EURUSD=X")],
+                         ["AAPL", "MSFT", "BRK-B", "BF-B", "^IXIC", "^GSPC", "^GSPC", "SAP.DE", "BTC-USD", "EURUSD=X"])
+        for ok in ("AAPL", "BRK-B", "^GSPC", "SAP.DE", "BTC-USD", "EURUSD=X", "GC=F"):
+            self.assertTrue(server.SYMBOL.match(ok), ok)
+        for bad in ("rm -rf", "", "A" * 20, "AA PL", "drop;table"):
+            self.assertFalse(server.SYMBOL.match(bad), bad)
+        self.assertEqual([server.stock_label(x) for x in ("^IXIC", "^GSPC", "BTC-USD", "AAPL", "^TNX")], ["Nasdaq", "S&P 500", "BTC", "AAPL", "TNX"])
+
+    def test_home_assistant_wording(self):
+        d = server.ha_describe
+        self.assertEqual(d("lock", "locked", 5, 10)["tone"], "good")
+        self.assertEqual((d("lock", "unlocked", 3, 10)["text"], d("lock", "unlocked", 3, 10)["tone"]), ("Unlocked", "bad"))
+        self.assertEqual(d("lock", "unlocked", 130, 10)["text"], "Unlocked 2 h")
+        self.assertEqual(d("lock", "jammed", 0, 10)["tone"], "bad")
+        self.assertEqual((d("opening", "on", 4, 10)["text"], d("opening", "on", 4, 10)["tone"]), ("Open", "warn"))
+        self.assertEqual(d("opening", "on", 15, 10)["tone"], "bad")
+        self.assertEqual(d("opening", "off", 15, 10)["text"], "Closed")
+        self.assertEqual(d("alarm", "armed_away", 0, 10)["text"], "Armed away")
+        self.assertEqual(d("alarm", "triggered", 0, 10)["tone"], "bad")
+        self.assertEqual(d("person", "home", 0, 10)["text"], "Home")
+        self.assertEqual(d("lock", "unavailable", 0, 10)["text"], "Unavailable")
 
     def test_layout(self):
         box = lambda t, **kw: {"type": t, "x": 40, "y": 40, "w": 400, "h": 200, **kw}

@@ -6,6 +6,8 @@
 # "compose.yaml", and set DATA_DIR (and TZ) under Environment variables. "Pull and redeploy"
 # updates it later.
 #
+# (512 MB: the stock prices come through yfinance, which loads pandas and numpy.)
+#
 # Everything the server knows lives in DATA_DIR (settings, keys, photos, counters): that folder is
 # the whole backup. It must be owned by uid 1000, which is who the container runs as:
 #   sudo chown -R 1000:1000 "$DATA_DIR"
@@ -24,7 +26,7 @@ services:
       - "${PORT:-8080}:8080"
     volumes:
       - ${DATA_DIR:-./data}:/data
-    mem_limit: 200m
+    mem_limit: 512m
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/admin/api/session', timeout=5)"]
       interval: 60s

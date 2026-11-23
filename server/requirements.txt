@@ -1,2 +1,4 @@
 icalendar>=5.0
 recurring-ical-events>=2.0
+# Stock prices from Yahoo Finance (unofficial; no key). Brings in pandas and numpy: give the container 512 MB.
+yfinance>=1.8.0,<2

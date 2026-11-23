@@ -11,4 +11,4 @@ services:
       TZ: ${TZ:-UTC}
     volumes:
       - ./data:/data
-    mem_limit: 200m
+    mem_limit: 512m

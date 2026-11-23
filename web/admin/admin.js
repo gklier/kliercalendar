@@ -235,7 +235,7 @@
         </div>
         <div class="item"><span class="label">Drive times</span>${sourceState("drive", "Google Maps")}
           <span class="sub">${mapsUsage()}</span></div>
-        ${settings.stocks.enabled ? `<div class="item"><span class="label">Stocks</span>${sourceState("stocks", "Finnhub")}</div>` : ""}
+        ${settings.stocks.enabled ? `<div class="item"><span class="label">Stocks</span>${sourceState("stocks", "Yahoo Finance")}</div>` : ""}
       </div>
       </div>
 
@@ -530,46 +530,38 @@
     const st = settings.stocks;
     page.innerHTML = `
       <h1>Stocks</h1>
-      <p class="lede">A bar along the bottom of the TV that keeps sliding past the tickers you choose, with the latest price and today's change in green or red.</p>
+      <p class="lede">A bar along the bottom of the TV that keeps sliding past the tickers you choose, with the latest price and today's change in green or red. Prices come from Yahoo Finance.</p>
       <form id="stk-form" novalidate>
         <div class="group">
           <div class="item"><label for="stk-on">Show the bar</label><input id="stk-on" type="checkbox" ${st.enabled ? "checked" : ""}></div>
           <div class="item"><label for="stk-syms">Tickers</label>
-            <input id="stk-syms" type="text" autocomplete="off" autocapitalize="characters" value="${esc((st.symbols || []).join(", "))}" placeholder="AAPL, MSFT, SPY, VTI">
-            <span class="sub">In the order they should scroll, up to 30. Add them from the lookup below, or type symbols separated by commas.</span>
+            <input id="stk-syms" type="text" autocomplete="off" autocapitalize="characters" value="${esc((st.symbols || []).join(", "))}" placeholder="AAPL, MSFT, ^GSPC, BTC-USD">
+            <span class="sub">In the order they should scroll, up to 30. Add them from the lookup below, or type symbols separated by commas. Stocks, ETFs, mutual funds, indexes (^GSPC) and crypto (BTC-USD) all work.</span>
             <div class="chips" id="stk-chips" aria-label="Tickers on the bar"></div></div>
           <div class="item"><label for="stk-find">Find a company</label>
-            <input id="stk-find" type="search" autocomplete="off" placeholder="Type a name, like Apple, Tesla or Vanguard" ${st.api_key.set ? "" : "disabled"}>
-            <span class="sub" id="stk-find-note">${st.api_key.set ? "Pick a result to add its symbol to the bar." : "Needs the Finnhub key first. Ask whoever set up the dashboard."}</span>
+            <input id="stk-find" type="search" autocomplete="off" placeholder="Type a name, like Apple, Tesla or Vanguard">
+            <span class="sub" id="stk-find-note">Pick a result to add its symbol to the bar.</span>
             <div class="results" id="stk-results" role="list"></div></div>
-          <div class="item expert-only"><label for="stk-key">Finnhub key</label>
-            <input id="stk-key" type="password" autocomplete="off" placeholder="${esc(secretPlaceholder(st.api_key, "Paste your key"))}"></div>
           <div class="item expert-only"><label for="stk-every">Update every</label>
-            <div class="inline"><input id="stk-every" type="number" min="5" max="600" value="${st.refresh_seconds || 15}" style="max-width:110px"> seconds</div>
-            <span class="sub">While US markets are open (4 AM to 8 PM Eastern on weekdays, including pre- and after-hours). Overnight and at weekends, every 15 minutes. With many tickers it slows down a little to stay inside Finnhub's free limit.</span></div>
+            <div class="inline"><input id="stk-every" type="number" min="15" max="600" value="${st.refresh_seconds || 30}" style="max-width:110px"> seconds</div>
+            <span class="sub">While US markets are open (4 AM to 8 PM Eastern on weekdays, including pre- and after-hours). Overnight and at weekends, every 15 minutes. Every ticker is a separate request to Yahoo, so with many tickers it slows down a little to be gentle.</span></div>
         </div>
         <details class="expert-only">
-          <summary>How to get a Finnhub key</summary>
-          <ol>
-            <li>Make a free account at <a href="https://finnhub.io/register">finnhub.io</a>.</li>
-            <li>Copy the API key from the dashboard page it opens.</li>
-            <li>Paste it above and select <b>Test</b>.</li>
-          </ol>
-          <p>The free plan gives live prices for US stocks and ETFs. Indexes like the S&amp;P 500 itself aren't on the free plan; SPY, VOO or VTI track it closely. The key stays on the server and is never shown again here.</p>
+          <summary>About these prices</summary>
+          <p>They come from Yahoo Finance through the community <code>yfinance</code> package. It needs no account or key. It isn't an official service, so prices can be delayed (up to about 15 minutes on some exchanges), and Yahoo can change or limit it without notice. If it ever stops working, the bar keeps the last prices and says how old they are. Treat the bar as a glance, not as something to trade on.</p>
+          <p>Symbols follow Yahoo's style: <code>BRK-B</code> (with a dash) for share classes, <code>SAP.DE</code> for other countries' exchanges, <code>^GSPC</code> for the S&amp;P 500, <code>BTC-USD</code> for Bitcoin. Typing <code>BRK.B</code> or <code>NASDAQ</code> is turned into the right symbol for you.</p>
         </details>
         <div class="savebar"><button class="primary" type="submit">Save changes</button><button class="secondary expert-only" type="button" id="test-stk">Test</button><span class="msg" role="status"></span></div>
         <p class="test-result" id="stk-out"></p>
       </form>`;
     const collect = () => {
-      const out = { stocks: { enabled: $("#stk-on").checked, symbols: $("#stk-syms").value, refresh_seconds: Number($("#stk-every").value) } };
-      if ($("#stk-key").value.trim()) out.stocks.api_key = $("#stk-key").value.trim();
-      return out;
+      return { stocks: { enabled: $("#stk-on").checked, symbols: $("#stk-syms").value, refresh_seconds: Number($("#stk-every").value) } };
     };
     bindSave($("#stk-form"), collect, () => pageStocks(page));
     $("#test-stk").onclick = () => runTest("stocks", collect(), $("#stk-out"));
 
     // Ticker chips: the text box is the source of truth, the chips are just a friendlier view of it
-    const syms = () => [...new Set($("#stk-syms").value.toUpperCase().split(/[\s,]+/).map((x) => x.replace(/^\$/, "")).filter(Boolean))];
+    const syms = () => [...new Set($("#stk-syms").value.toUpperCase().split(/[\s,]+/).map((x) => x.replace(/^\$/, "")).filter(Boolean))];   // as typed: the server tidies them on save
     const setSyms = (list) => { $("#stk-syms").value = list.join(", "); drawChips(); };
     function drawChips() {
       const list = syms();
@@ -581,7 +573,7 @@
     $("#stk-syms").addEventListener("input", drawChips);
     drawChips();
 
-    // Company lookup, through Finnhub's search (debounced; the key stays on the server)
+    // Company lookup, through Yahoo's search (debounced)
     let timer = 0, ticket = 0;
     $("#stk-find").addEventListener("input", () => {
       clearTimeout(timer);
@@ -595,10 +587,9 @@
           if (mine !== ticket) return;
           const have = new Set(syms());
           box.innerHTML = results.length ? results.map((r) => `
-            <div class="res${r.free ? "" : " off"}" role="listitem">
-              <div><b>${esc(r.symbol)}</b> <span>${esc(r.name)}</span> <small>${esc(r.type)}</small>
-                ${r.free ? "" : `<small class="warn">Not on the free plan</small>`}</div>
-              <button type="button" class="secondary" data-add="${esc(r.symbol)}" ${r.free && !have.has(r.symbol) ? "" : "disabled"}>${have.has(r.symbol) ? "On the bar" : "Add"}</button>
+            <div class="res" role="listitem">
+              <div><b>${esc(r.symbol)}</b> <span>${esc(r.name)}</span> <small>${esc(r.type)}</small></div>
+              <button type="button" class="secondary" data-add="${esc(r.symbol)}" ${have.has(r.symbol) ? "disabled" : ""}>${have.has(r.symbol) ? "On the bar" : "Add"}</button>
             </div>`).join("") : `<p class="sub" style="grid-column:auto">Nothing found. Try the company's full name.</p>`;
         } catch (err) {
           if (mine === ticket) box.innerHTML = `<p class="state bad" style="grid-column:auto">${esc(err.message)}</p>`;

@@ -381,6 +381,30 @@ body.has-ticker .ticker { display: flex; }
 .tk.flat .pc { color: var(--ink-2); }
 .tk-note { padding: 0 24px; font-size: 17px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
 
+/* ---------- Home Assistant: status tiles, camera tile, motion pop-up ---------- */
+
+/* Both stay out of the built-in arrangement; the layout turns them on */
+.home { display: none; flex-wrap: wrap; align-content: center; align-items: center; gap: 8px 10px; padding: 8px 16px; overflow: hidden; border-radius: 30px; }
+.camera { display: none; position: relative; overflow: hidden; padding: 0; background: #000; }
+.camera img, .cam-popup img { width: 100%; height: 100%; display: block; background: #000; }
+.camera img { object-fit: cover; }
+.camera img.broken, .cam-popup img.broken { opacity: 0.35; }
+.cam-name, .pop-name { position: absolute; left: 12px; bottom: 10px; padding: 3px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.55); color: #FFFFFF; font-size: 16px; font-weight: 650; }
+.hsum { display: flex; align-items: center; gap: 8px; padding-right: 10px; font-size: 19px; font-weight: 700; }
+.hs { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 10px; border-radius: 999px; background: var(--well); font-size: 16px; white-space: nowrap; }
+.hs b { font-weight: 650; }
+.hs span { font-weight: 650; }
+.hs.good span, .hsum.good { color: var(--green); }
+.hs.warn span, .hsum.warn { color: var(--yellow); }
+.hs.bad span, .hsum.bad { color: var(--red); }
+.hs.neutral span { color: var(--ink-2); }
+.hs.bad { background: rgba(255, 69, 58, 0.16); box-shadow: inset 0 0 0 1.5px var(--red); }
+.hi { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cam-popup { position: absolute; left: 240px; top: 110px; width: 1440px; height: 860px; z-index: 60; border-radius: 34px; overflow: hidden; background: #000;
+  border: 2px solid rgba(255, 255, 255, 0.35); box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); }
+.cam-popup img { object-fit: contain; }
+.pop-name { left: 28px; top: 22px; bottom: auto; padding: 6px 18px; font-size: 28px; }
+
 /* ---------- Status, night ---------- */
 
 body.has-ticker .status { bottom: 9vh; }

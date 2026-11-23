@@ -13,6 +13,8 @@
     weather: null,
     calendar: null,
     drive: null,
+    home: null,          // Home Assistant status tiles
+    cameras: null,       // chosen cameras and which have motion
     events: [],          // parsed calendar events
     routes: {},          // "location|start" -> { data, error, at, pending }
     photos: { list: [], i: 0, timer: null },
@@ -97,6 +99,8 @@
     calendar: { el: () => document.querySelector(".calendar") },
     focus: { el: () => $("focus") },
     ticker: { el: () => $("ticker"), base: [1854, 50] },
+    home: { el: () => $("home"), base: [1422, 64], display: "flex" },        // Home Assistant status tiles
+    camera: { el: () => $("camera"), base: [410, 250], display: "block" },   // one camera, or all in turn
   };
   const layoutOf = (type) => (cfg.layout && cfg.layout.widgets && cfg.layout.widgets.find((w) => w.type === type)) || null;
   const widgetOpt = (type, key, fallback) => { const w = layoutOf(type); return w && w.options && w.options[key] != null ? w.options[key] : fallback; };
@@ -120,7 +124,7 @@
       const w = layoutOf(type);
       if (!w || w.visible === false) { el.style.display = "none"; continue; }
       const k = widgetZoom(type);   // CSS zoom scales positions too, so divide them by it
-      el.style.cssText = `position:absolute;left:${w.x / k}px;top:${w.y / k}px;width:${w.w / k}px;height:${w.h / k}px;zoom:${k};`;
+      el.style.cssText = `position:absolute;left:${w.x / k}px;top:${w.y / k}px;width:${w.w / k}px;height:${w.h / k}px;zoom:${k};${spec.display ? `display:${spec.display};` : ""}`;
     }
   }
 
@@ -530,7 +534,7 @@
     const cls = up ? "up" : down ? "down" : "flat";
     const arrow = up ? "\u25B2" : down ? "\u25BC" : "\u2022";
     const price = q.price >= 1000 ? q.price.toLocaleString([], { maximumFractionDigits: 2, minimumFractionDigits: 2 }) : q.price.toFixed(2);
-    return `<span class="tk ${cls}" data-sym="${esc(q.symbol)}"><b>${esc(q.symbol)}</b><span class="px">${price}</span>`
+    return `<span class="tk ${cls}" data-sym="${esc(q.symbol)}"><b>${esc(q.label || q.symbol)}</b><span class="px">${price}</span>`
       + `<span class="pc">${arrow} ${Math.abs(q.percent).toFixed(2)}%</span></span>`;
   }
 
@@ -572,6 +576,82 @@
     setTimeout(scheduleStocks, Math.max(secs, 5) * 1000);
   }
 
+  // ---------- Home Assistant: status tiles, camera tile, motion pop-up ----------
+
+  const HI = {
+    lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+    unlock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-1.8"/>',
+    door: '<path d="M6 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17"/><path d="M4 21h16"/><circle cx="14.5" cy="12.5" r=".8"/>',
+    garage: '<path d="M3 21V9l9-5 9 5v12"/><path d="M7 21v-7h10v7"/><path d="M7 17.5h10"/>',
+    window: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M12 4v16M4 12h16"/>',
+    shield: '<path d="M12 3l7 3v5c0 5-3 8.5-7 10-4-1.5-7-5-7-10V6z"/>',
+    person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    motion: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    dot: '<circle cx="12" cy="12" r="4"/>',
+  };
+  const hicon = (name) => `<svg class="hi" viewBox="0 0 24 24" aria-hidden="true">${HI[name] || HI.dot}</svg>`;
+
+  function renderHome() {
+    const el = $("home");
+    if (!el) return;
+    const h = state.home;
+    if (!h || !h.items) { el.innerHTML = `<p class="note">${waiting("home", "Choose what to show in Settings → Smart home.")}</p>`; return; }
+    const sum = h.summary && h.summary.text ? `<div class="hsum ${esc(h.summary.tone)}">${h.summary.tone === "good" ? hicon("check") : ""}${esc(h.summary.text)}</div>` : "";
+    el.innerHTML = sum + h.items.map((i) => `<div class="hs ${esc(i.tone)}">${hicon(i.icon)}<b>${esc(i.name)}</b><span>${esc(i.text)}</span></div>`).join("");
+  }
+
+  const camList = () => (state.cameras && state.cameras.cameras) || [];
+  const camURL = (id) => (state.mode === "demo" ? window.Demo.cameraImage(id) : `api/ha/camera/${encodeURIComponent(id)}.jpg?t=${Date.now()}`);
+
+  // Show a picture in an <img> only once it has loaded, so the tile never flashes blank between refreshes
+  function showPicture(img, id, done) {
+    const probe = new Image();
+    probe.onload = () => { img.src = probe.src; img.classList.remove("broken"); if (done) done(true); };
+    probe.onerror = () => { img.classList.add("broken"); if (done) done(false); };
+    probe.src = camURL(id);
+  }
+
+  // The camera tile: the camera chosen for it in Layout, or every camera in turn
+  const tile = { i: 0, timer: 0, last: 0 };
+  function tickCamera() {
+    clearTimeout(tile.timer);
+    const el = $("camera"), w = layoutOf("camera");
+    if (!el || !w || w.visible === false || !(cfg.ha && cfg.ha.cameras)) return;
+    tile.timer = setTimeout(tickCamera, 2000);
+    const cams = camList();
+    if (!cams.length) { el.querySelector(".cam-name").textContent = "No camera chosen"; return; }
+    const want = widgetOpt("camera", "camera", "");
+    let cam = cams.find((c) => c.id === want);
+    if (!cam) {                                              // not pinned to one: step through them every 10 seconds
+      if (Date.now() - tile.last > 10000) { tile.i = (tile.i + 1) % cams.length; tile.last = Date.now(); }
+      cam = cams[tile.i % cams.length];
+    }
+    el.querySelector(".cam-name").textContent = cam.name;
+    showPicture(el.querySelector("img"), cam.id);
+  }
+
+  // The motion pop-up: a big picture that closes itself a while after the motion stops
+  const pop = { id: null, timer: 0 };
+  function tickPopup() {
+    clearTimeout(pop.timer);
+    if (!pop.id) return;
+    pop.timer = setTimeout(tickPopup, 1000);
+    showPicture($("cam-popup").querySelector("img"), pop.id);
+  }
+  function renderCameras() {
+    const c = state.cameras, el = $("cam-popup");
+    const live = c && c.popup ? c.cameras.filter((x) => x.active && x.popup) : [];
+    if (!el) return;
+    if (live.length) {
+      $("cam-popup").querySelector(".pop-name").textContent = live[0].name;
+      if (pop.id !== live[0].id) { pop.id = live[0].id; el.hidden = false; tickPopup(); }
+    } else if (pop.id) {
+      pop.id = null; clearTimeout(pop.timer); el.hidden = true;
+    }
+    if (!tile.timer) tickCamera();
+  }
+
   // ---------- Status ----------
 
   function waiting(source, fallback) {
@@ -582,7 +662,7 @@
   function renderStatus() {
     const chips = [];
     if (state.mode === "demo") chips.push(`<span class="chip">Demo data</span>`);
-    const names = { weather: "Weather", calendar: "Calendar", drive: "Drive times", stocks: "Stocks" };
+    const names = { weather: "Weather", calendar: "Calendar", drive: "Drive times", stocks: "Stocks", home: "Home status", cameras: "Cameras" };
     for (const [k, v] of Object.entries(state.errors)) chips.push(`<span class="chip warn">${names[k]} offline since ${fmtTime(v.since)}</span>`);
     $("status").innerHTML = chips.join("");
   }
@@ -629,6 +709,8 @@
     if (source === "calendar") { state.events = parseEvents(state.calendar); renderCalendar(); renderFocus(); }
     if (source === "drive") renderDrive();
     if (source === "stocks") renderTicker();
+    if (source === "home") renderHome();
+    if (source === "cameras") renderCameras();
     renderStatus();
   }
 
@@ -653,6 +735,7 @@
     if (forced === "demo") {
       // Demo data, but the look (layout, background, clock style) still comes from the server when there is one
       try { Object.assign(cfg, await getJSON("api/config", 3000)); } catch (_) { /* a static preview has no server */ }
+      cfg.ha = { status: true, cameras: true, popup: params.get("popup") === "1" };   // sample tiles and cameras
       return demo();
     }
     try {
@@ -686,7 +769,7 @@
     applyLayout();
     applyBackground();
     renderClock();
-    renderTicker();
+    renderTicker(); renderHome();
     renderWeather(); renderDrive(); renderCalendar(); renderFocus(); renderStatus();
     tickMinute();
     const r = cfg.refresh || {};
@@ -694,6 +777,8 @@
     schedule("calendar", r.calendar || 300);
     schedule("drive", r.drive || 300);
     scheduleStocks();
+    if (cfg.ha && cfg.ha.status) schedule("home", 15);
+    if (cfg.ha && cfg.ha.cameras) schedule("cameras", 3);
     loadPhotos();
     setInterval(loadPhotos, 30 * 60000);
     if (state.mode === "live") watchVersion();
@@ -708,7 +793,7 @@
     cfg.layout = e.data.layout;
     applyLayout();
     const t = $("ticker"); if (t) t.dataset.syms = "";
-    renderCalendar(); renderFocus(); renderTicker();
+    renderCalendar(); renderFocus(); renderTicker(); tickCamera();
   });
 
   boot();

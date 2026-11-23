@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
 ![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi-4-A22846?logo=raspberrypi&logoColor=white)
-![Dependencies](https://img.shields.io/badge/dependencies-2-brightgreen)
+![Dependencies](https://img.shields.io/badge/dependencies-3-brightgreen)
 ![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
 
 <br>
@@ -46,7 +46,8 @@ It started as a replacement for a hosted dashboard service, so it keeps that ser
 - 🚗 **When to leave.** The next event with an address shows the drive time, current traffic and a "Leave by" time. Later events get their own on the right.
 - 🏠 **Drive times** to four places that matter, always on screen, inside a **monthly Google Maps budget** (900 reads by default, spread evenly through the month so a busy morning can't use the rest of it).
 - 🌦 **Weather** from a Tempest station, with the next four days, and a **sky** that follows the real weather and the time of day.
-- 📈 **A stock bar** that never stops sliding: live prices in green and red with the percent change, for tickers you choose.
+- 📈 **A stock bar** that never stops sliding: prices in green and red with the percent change, for the tickers you choose. Stocks, ETFs, mutual funds, indexes and crypto, from Yahoo Finance, with no account or key.
+- 🔒 **Smart home** (Home Assistant): lock, door, garage, alarm and who's-home tiles with an "All secure" summary and warnings when something has been left open, a camera tile, and a pop-up that covers the screen when a camera sees motion.
 - 🖼 **Backgrounds**: the weather sky, family photos, one photo, ten gradients, or a flat colour. Light, dark or automatic by sunrise and sunset.
 - 🧩 **A free layout**: drag the clock, resize the calendar, hide what you don't need.
 - 🌙 **Sleep schedules** by day of the week: the screen (and the TV, over HDMI-CEC) switches off and on by itself, with a one-click "sleep now" or "keep awake".
@@ -70,7 +71,8 @@ flowchart LR
         GC["Google Calendar<br/>CalDAV"]
         GM["Google Maps<br/>Routes API"]
         TW["Tempest<br/>weather"]
-        FH["Finnhub<br/>quotes + search"]
+        FH["Yahoo Finance<br/>quotes + search"]
+        HA["Home Assistant<br/>locks · doors · cameras"]
     end
     S[("Dashboard server<br/>Python · one container<br/>/data = settings, photos")]
     TV["The TV<br/>Raspberry Pi 4<br/>cage + Chromium kiosk"]
@@ -79,11 +81,12 @@ flowchart LR
     GM --> S
     TW --> S
     FH --> S
+    HA --> S
     S <-. "HTTP, home network" .-> TV
     S <-. "HTTP, home network" .-> B
 ```
 
-- **The server** is one small Python process (standard library plus two calendar packages). It holds every key and the only copy of the settings.
+- **The server** is one small Python process (standard library plus three packages: two for calendars, one for stock prices). It holds every key and the only copy of the settings.
 - **The TV** only shows a web page. A launcher script asks the server every few seconds which page to show and whether the screen should be asleep. Nothing on the Pi is irreplaceable.
 
 More detail, including the API and the data model, is in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -119,9 +122,10 @@ In the settings, with **Expert settings** switched on:
 | **Calendars** | The Google account's email and an **app password** | [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) (the account needs 2-Step Verification) |
 | **Weather** | Station ID and access token | [tempestwx.com](https://tempestwx.com) |
 | **Drive times** | A Google Maps **Routes API** key and the addresses | [console.cloud.google.com](https://console.cloud.google.com) |
-| **Stocks** | A free Finnhub key and some tickers | [finnhub.io/register](https://finnhub.io/register) |
+| **Smart home** | Home Assistant's address and a long-lived access token | In Home Assistant: your profile, Security, Long-lived access tokens. See [docs/home-assistant.md](docs/home-assistant.md) |
+| **Stocks** | Just tickers: no key | Look them up by name on the page. Prices come from Yahoo Finance through the [yfinance](https://pypi.org/project/yfinance/) package |
 
-Keys are stored on the server only and are never shown again, in the browser or in the logs.
+Keys are stored on the server only and are never shown again, in the browser or in the logs. (Stock prices need none.)
 
 ### 3 · Set up the TV
 
@@ -143,6 +147,7 @@ The installer sets up a full-screen Chromium inside [cage](https://github.com/ca
 | **On the TV** | Switch between the family dashboard and the fallback screen, reload the TV |
 | **Calendars** | Rename, recolour and switch calendars on or off |
 | **Stocks** | Look companies up by name and build the bar |
+| **Smart home** | Choose the lock, door and alarm tiles and the cameras; pop-up settings |
 | **Look** | Background, light or dark, clock style, overnight dimming |
 | **Schedule** | When the screen sleeps, by day; sleep now or keep awake |
 | *Layout* | Move and resize every widget |
@@ -156,7 +161,7 @@ The installer sets up a full-screen Chromium inside [cage](https://github.com/ca
 
 - One settings password, stored as a salted PBKDF2-SHA256 hash. Sessions are `HttpOnly`, `SameSite=Strict` cookies; repeated wrong passwords lock sign-in for five minutes.
 - Changes need a custom header a web page on another site can't send.
-- The data feeds are open only to a signed-in settings session, a TV carrying its **TV key**, or (if you switch it on) the home network.
+- The data feeds are open only to a signed-in settings session, a TV carrying its **TV key**, or (if you switch it on) the home network. Lock states and camera pictures are never offered to the home network: only the TV or a settings session sees them.
 - Secrets never leave the server, and the settings file is readable only by its owner.
 - It speaks plain HTTP, meant for a trusted home network. Put any reverse proxy in front for HTTPS; cookies turn `Secure` by themselves.
 - Use a dedicated Google account, or share the calendars read-only with one. An app password can reach more than calendars; revoke it from the Google account page to cut the dashboard off at once.
@@ -192,6 +197,6 @@ docs/      Screenshots and design notes
 
 ## Ideas on the list
 
-Camera feeds from a UniFi Protect system through Home Assistant, shown on motion or in a fixed tile: see [docs/cameras.md](docs/cameras.md).
+Smooth live camera video and quiet hours for pop-ups: see the last section of [docs/home-assistant.md](docs/home-assistant.md).
 
 <div align="center"><br><sub>A family project, shared as it is.</sub></div>

@@ -180,5 +180,30 @@
     };
   }
 
-  window.Demo = { weather, calendar, drive, route, stocks };
+  // Sample Home Assistant tiles and cameras, for the layout editor's preview and ?mode=demo
+  function home() {
+    const t = (name, text, tone, icon) => ({ id: name, name, kind: "x", state: "", minutes: 0, text, tone, icon });
+    return {
+      items: [t("Front door", "Locked", "good", "lock"), t("Back door", "Locked", "good", "lock"), t("Garage", "Closed", "good", "garage"),
+              t("Alarm", "Armed home", "good", "shield"), t("Alex", "Home", "good", "person"), t("Sam", "Away", "neutral", "person")],
+      summary: { text: "All secure", tone: "good" }, updated: Math.floor(Date.now() / 1000),
+    };
+  }
+  function cameras(now) {
+    const burst = /[?&]popup=1/.test(location.search) || Math.floor(now.getTime() / 20000) % 9 === 0;   // a pretend motion event now and then
+    return {
+      cameras: [{ id: "camera.front", name: "Front door", active: burst, popup: true, since: null },
+                { id: "camera.driveway", name: "Driveway", active: false, popup: true, since: null }],
+      popup: true, seconds: 30, updated: Math.floor(now.getTime() / 1000),
+    };
+  }
+  function cameraImage(id) {
+    const t = Date.now() / 1000, x = 120 + 60 * Math.sin(t / 2.2), name = id.replace("camera.", "").replace(/_/g, " ");
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2B3A4F"/><stop offset="1" stop-color="#101822"/></linearGradient></defs>`
+      + `<rect width="640" height="360" fill="url(#g)"/><rect x="0" y="250" width="640" height="110" fill="#1B2430"/><circle cx="${x}" cy="215" r="22" fill="#7A8CA5"/><rect x="${x - 18}" y="237" width="36" height="70" rx="12" fill="#7A8CA5"/>`
+      + `<text x="20" y="38" font-family="sans-serif" font-size="22" fill="#FFFFFF" opacity=".8">Sample picture: ${name}</text></svg>`;
+    return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+  }
+
+  window.Demo = { weather, calendar, drive, route, stocks, home, cameras, cameraImage };
 })();

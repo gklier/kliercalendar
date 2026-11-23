@@ -320,3 +320,21 @@ input[type="range"] { accent-color: var(--accent); }
 .wchip { background: var(--group); color: var(--ink); padding: 7px 14px; border-radius: 999px; font-size: 14px; }
 .wchip.sel { background: var(--accent); color: #FFFFFF; }
 .wchip.off { opacity: 0.6; }
+
+
+/* ---------- Smart home ---------- */
+
+.ha-list { background: var(--group); border-radius: var(--r); overflow: hidden; }
+.ha-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) minmax(0, 1.2fr) auto; gap: 10px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--line); }
+.ha-row:first-child, .ha-cam:first-child { border-top: 0; }
+.ha-kind { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.ha-row .meta, .ha-cam .meta { font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.ha-cam { display: grid; grid-template-columns: 132px minmax(0, 1fr) auto; gap: 12px; align-items: start; padding: 12px 16px; border-top: 1px solid var(--line); }
+.ha-thumb { width: 132px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; background: #000; }
+.ha-fields { display: grid; gap: 4px; min-width: 0; }
+@media (max-width: 640px) {
+  .ha-row { grid-template-columns: 1fr auto; }
+  .ha-row .ha-kind, .ha-row .meta { grid-column: 1 / -1; }
+  .ha-cam { grid-template-columns: 1fr auto; }
+  .ha-thumb { display: none; }
+}
