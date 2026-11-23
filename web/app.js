@@ -382,7 +382,11 @@
     const now = new Date(), today = startOfDay(now);
     const grid = $("cal-grid");
     const days = [7, 14, 21, 28].includes(widgetOpt("calendar", "days", 14)) ? widgetOpt("calendar", "days", 14) : 14;
-    grid.style.gridTemplateRows = `repeat(${Math.ceil(days / 7)}, minmax(0, 1fr))`;
+    // A narrow calendar box uses fewer, wider columns (about 175px a day or more) so the text stays readable
+    const fit = Math.max(2, Math.min(7, Math.floor((grid.clientWidth || 1400) / 175)));
+    const rows = Math.ceil(days / fit), cols = Math.ceil(days / rows);
+    grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
     const title = days === 7 ? "Next week" : days === 14 ? "Next two weeks" : days === 21 ? "Next three weeks" : "Next four weeks";
     const h = document.querySelector(".cal-top h2");
     if (h && h.textContent !== title) { h.textContent = title; h.closest("section").setAttribute("aria-label", title); }
