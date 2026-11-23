@@ -55,7 +55,7 @@ sudo reboot</code></pre></li>
       </ol>
       <div class="group"><div class="item" style="grid-template-columns:1fr">
         <div class="inline"><button class="secondary" type="button" id="mk-key">Make a TV key</button>
-          <span class="state">${FD.settings.tv.key.set ? "A key exists. Making a new one stops the current TV until it gets the new key." : "No key yet."}</span></div>
+          <span class="state">${FD.settings.tv.key.set ? "Keys exist. Making another one doesn't stop the others." : "No key yet."}</span></div>
         <div id="key-out"></div>
         <span class="sub" style="grid-column:1">The key is shown once and only a fingerprint of it is stored.</span>
       </div></div>
@@ -67,7 +67,6 @@ sudo reboot</code></pre></li>
       <p class="hint" style="margin-left:0">A spare card holding such an image, kept in a drawer, is the fastest recovery there is.</p>`;
 
     $("#mk-key").onclick = async () => {
-      if (FD.settings.tv.key.set && !confirm("Make a new TV key? The TV stops showing the dashboard until it has the new key.")) return;
       try {
         const res = await api("tv/key", {});
         FD.settings = res.settings;
@@ -129,7 +128,7 @@ sudo reboot</code></pre></li>
         <dt>Cross-site requests</dt>
         <dd>Every change needs a custom header (<code>X-Dashboard: 1</code>) that a web page on another site can't send without a pre-flight request the server never allows.</dd>
         <dt>Who can read the data</dt>
-        <dd>The JSON data (<code>/api/*</code>, photos) is open to: the same machine (only when the server runs on the TV's own computer), a signed-in settings session, a TV with the <b>TV key</b>, or anyone on the network if "Others can view" is switched on. The TV key is 32 random characters, stored only as a SHA-256 fingerprint and shown once. Making a new one cuts off the old.</dd>
+        <dd>The JSON data (<code>/api/*</code>, photos) is open to: the same machine (only when the server runs on the TV's own computer), a signed-in settings session, a TV with the <b>TV key</b>, or anyone on the network if "Others can view" is switched on. The TV key is 32 random characters, stored only as a SHA-256 fingerprint and shown once. Each screen has its own key, and one can be stopped without touching the others.</dd>
         <dt>Secrets</dt>
         <dd>Never sent back to a browser, never logged. The settings file is readable only by its owner (mode 600). The container runs as user 1000.</dd>
         <dt>Transport</dt>

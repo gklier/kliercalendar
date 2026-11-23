@@ -175,7 +175,7 @@ DEFAULT_CONFIG: dict = {
     # Home Assistant: locks, doors and the like as status tiles, and cameras as a tile or a motion pop-up
     "ha": {"enabled": False, "url": "", "token": "", "entities": [], "cameras": [],
            "popup": {"enabled": True, "seconds": 30}, "alert_minutes": 10, "refresh_seconds": 10},
-    "tv": {"key_hash": ""},
+    "tv": {"key_hash": "", "devices": []},
     "admin": {"password_hash": ""},
 }
 
@@ -683,7 +683,10 @@ def public_settings(c: dict) -> dict:
     """Settings as the admin page sees them: everything except secrets."""
     out = copy.deepcopy(c)
     out.pop("admin", None)
-    out["tv"] = {"key": {"set": bool(c["tv"]["key_hash"]), "hint": ""}}
+    devices = [{"id": d["id"], "name": d["name"], "made": d.get("made", "")} for d in c["tv"].get("devices", []) if isinstance(d, dict)]
+    if c["tv"]["key_hash"]:                 # the one key made before there could be several
+        devices.insert(0, {"id": "first", "name": "First TV key", "made": ""})
+    out["tv"] = {"key": {"set": bool(devices), "hint": ""}, "devices": devices}
     out["tempest"]["token"] = mask(c["tempest"]["token"])
     out["drive"]["api_key"] = mask(c["drive"]["api_key"])
     out["stocks"].pop("api_key", None)      # never send an old Finnhub key to a browser
@@ -1864,15 +1867,40 @@ class App:
         return "/?mode=live" if self.offsite else f"http://localhost:{self.config.get('port', 8080)}/?mode=live"
 
     def tv_key_ok(self, key: str | None) -> bool:
-        stored = self.config["tv"]["key_hash"]
-        return bool(key and stored) and hmac.compare_digest(key_hash(key), stored)
+        """Any TV key still on the list works. Each screen has its own, so one can be stopped alone."""
+        if not key or not isinstance(key, str):
+            return False
+        mine = key_hash(key)
+        tv = self.config["tv"]
+        stored = [tv["key_hash"]] + [d.get("hash", "") for d in tv.get("devices", []) if isinstance(d, dict)]
+        ok = False
+        for h in stored:
+            if h and hmac.compare_digest(mine, h):
+                ok = True
+        return ok
 
-    def new_tv_key(self) -> str:
-        key = secrets.token_urlsafe(24)
+    def new_tv_key(self, name: str = "TV") -> str:
+        """Make a key for one more screen. The others keep working."""
+        name = " ".join(str(name or "TV").split())[:40] or "TV"
         new = copy.deepcopy(self.config)
-        new["tv"]["key_hash"] = key_hash(key)
+        devices = [d for d in new["tv"].get("devices", []) if isinstance(d, dict)]
+        if len(devices) >= 12:
+            raise ValueError("That's plenty of TV keys. Stop one you no longer use first.")
+        key = secrets.token_urlsafe(24)
+        devices.append({"id": secrets.token_hex(4), "name": name, "hash": key_hash(key),
+                        "made": dt.datetime.now(self.tz).strftime("%Y-%m-%d")})
+        new["tv"]["devices"] = devices
         self.store.save(new)  # no rebuild needed
         return key
+
+    def revoke_tv_key(self, device_id: str) -> None:
+        """Stop one screen's key; a screen using it signs out, the rest carry on."""
+        new = copy.deepcopy(self.config)
+        if device_id == "first":
+            new["tv"]["key_hash"] = ""
+        else:
+            new["tv"]["devices"] = [d for d in new["tv"].get("devices", []) if not (isinstance(d, dict) and d.get("id") == device_id)]
+        self.store.save(new)
 
     def sleep_now(self) -> dict:
         return sleep_status(self.config["schedule"], dt.datetime.now(self.tz), self.sleep_override)
@@ -2288,7 +2316,10 @@ def make_handler(app: App):
                 return self._json(200, app.set_sleep_override(str(data.get("mode", "")), data.get("hours", 2)))
             if name == "tv/key":
                 # Shown once; only its hash is kept
-                return self._json(200, {"key": app.new_tv_key(), "settings": public_settings(app.config)})
+                return self._json(200, {"key": app.new_tv_key(data.get("name") or "TV"), "settings": public_settings(app.config)})
+            if name == "tv/revoke":
+                app.revoke_tv_key(str(data.get("id", "")))
+                return self._json(200, {"settings": public_settings(app.config)})
             if name == "calendar/refresh":
                 if data.get("email") or data.get("app_password"):
                     app.save(apply_settings(app.config, {"calendar": {"account": {

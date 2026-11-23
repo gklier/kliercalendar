@@ -223,15 +223,35 @@
       <div class="savebar"><button class="secondary" id="reload" type="button">Reload the TV</button><span class="msg" id="reload-msg" role="status"></span></div>
 
       <div class="expert-only">
-      <h2>Running the server off-site</h2>
-      <p class="hint">To run this program on a home server, NAS or cloud machine (easier to back up) and have the Pi only show it, the Pi needs a TV key. See "Off-site" in the README for the Docker steps.</p>
+      <h2>More screens (TV keys)</h2>
+      <p class="hint">The Pi on this machine needs nothing. Any other screen, such as a Fire TV, a second Pi or a tablet, gets its own key. Each key works on its own, so adding one never stops another.</p>
+      <div class="group" id="tvkeys"></div>
       <div class="group">
-        <div class="item"><span class="label">TV key</span>
-          <span class="state ${settings.tv.key.set ? "good" : ""}">${settings.tv.key.set ? "Made. Making a new one stops the old one working." : "None yet. Not needed while this program runs on the Pi."}</span>
-          <div class="inline"><button class="secondary" type="button" id="tvkey">${settings.tv.key.set ? "Make a new TV key" : "Make a TV key"}</button></div>
+        <div class="item"><span class="label">Add a screen</span>
+          <div class="inline"><input type="text" id="tvname" maxlength="40" placeholder="Name, such as Fire TV" aria-label="Name for the new screen">
+          <button class="secondary" type="button" id="tvkey">Make a TV key</button></div>
           <div id="tvkey-out"></div></div>
       </div>
       </div>`;
+
+    const drawKeys = () => {
+      const list = settings.tv.devices || [];
+      $("#tvkeys").innerHTML = list.length ? list.map((d) => `
+        <div class="item"><span class="label">${esc(d.name)}</span>
+          <span class="state good">Working${d.made ? ", made " + esc(d.made) : ""}</span>
+          <div class="inline"><button class="secondary" type="button" data-stop="${esc(d.id)}">Stop this key</button></div></div>`).join("")
+        : `<div class="item"><span class="label">No keys yet</span><span class="state">Not needed for the Pi on this machine.</span></div>`;
+      $("#tvkeys").querySelectorAll("[data-stop]").forEach((b) => b.onclick = async () => {
+        if (!confirm("Stop this key? The screen using it stops showing the dashboard. Other screens are not affected.")) return;
+        try {
+          settings = (await api("tv/revoke", { id: b.dataset.stop })).settings;
+          drawKeys();
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+    };
+    drawKeys();
 
     const frame = $("#preview iframe");
     const fitFrame = () => { if (frame) frame.style.transform = `scale(${$("#preview").clientWidth / 1920})`; };
@@ -239,13 +259,17 @@
     addEventListener("resize", fitFrame);
 
     $("#tvkey").onclick = async () => {
-      if (settings.tv.key.set && !confirm("Make a new TV key? A TV using the old one stops showing the dashboard until it gets the new one.")) return;
       try {
-        const res = await api("tv/key", {});
+        const res = await api("tv/key", { name: $("#tvname").value });
         settings = res.settings;
+        drawKeys();
+        $("#tvname").value = "";
         const server = location.origin;
         $("#tvkey-out").innerHTML = `
-          <p class="sub" style="margin-top:10px">Copy it now; it's shown only once. On the Pi, run:</p>
+          <p class="sub" style="margin-top:10px">Copy it now; it's shown only once.</p>
+          <p class="sub"><b>Fire TV, tablet or any browser:</b> open this address on the screen, then leave it up.</p>
+          <pre><code>${esc(server)}/tv#k=${esc(res.key)}</code></pre>
+          <p class="sub"><b>A Raspberry Pi:</b> run this on it.</p>
           <pre><code>cd ~/family-dashboard && sudo DASHBOARD_SERVER=${esc(server)} DASHBOARD_TV_KEY=${esc(res.key)} ./pi/install-display.sh</code></pre>
           <p class="sub">Use the off-site server's https:// address if this page isn't open on it.</p>`;
       } catch (err) {

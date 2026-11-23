@@ -920,9 +920,22 @@ class OffsiteTest(unittest.TestCase):
         self.assertEqual(c.call("/api/config")[0], 200)
         self.assertIn(b"TV key", c.call("/tv/")[1])
 
-        # A new key retires the old one
-        self.app.new_tv_key()
-        self.assertEqual(c.call("/api/config")[0], 401)
+        # A second screen gets its own key; the first keeps working
+        second = self.app.new_tv_key("Fire TV")
+        self.assertNotEqual(key, second)
+        self.assertEqual(c.call("/api/config")[0], 200)
+        c2 = Client(self.base)
+        self.assertEqual(c2.call("/api/tv/pair", {"key": second})[0], 200)
+        self.assertEqual(c2.call("/api/config")[0], 200)
+        names = [d["name"] for d in server.public_settings(self.app.config)["tv"]["devices"]]
+        self.assertEqual(names, ["TV", "Fire TV"])
+        self.assertNotIn(second, json.dumps(server.public_settings(self.app.config)))
+
+        # Stopping one screen leaves the other
+        dev = server.public_settings(self.app.config)["tv"]["devices"][1]["id"]
+        self.app.revoke_tv_key(dev)
+        self.assertEqual(c2.call("/api/config")[0], 401)
+        self.assertEqual(c.call("/api/config")[0], 200)
 
     def test_lockout_uses_forwarded_address(self):
         self.app.new_tv_key()
