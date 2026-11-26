@@ -170,6 +170,18 @@ The installer sets up a full-screen Chromium inside [cage](https://github.com/ca
 
 The server's data folder is the only thing that can't be recreated. The **Backup** page downloads it as one file, and shows how to automate that. The TV is rebuilt in about ten minutes from a fresh card with the command above, or restored from an image made with [`tools/backup-sd-card.sh`](tools/backup-sd-card.sh).
 
+## Power cuts and internet outages
+
+Built to ride them out without anyone touching it.
+
+- **Internet gone:** the TV needs only the home network and the server, so it keeps showing the last good information with small "offline since" notes, and refreshes by itself when the internet is back.
+- **Power gone:** everything starts again by itself. The TV waits for the network, then opens the dashboard.
+- **Router slower than the Pi:** a watchdog on the Pi keeps retrying the Wi-Fi, asks for the saved connection again, restarts the network service, and as a last resort restarts the Pi (at most once an hour, and only when the *router* can't be reached, never for an internet outage). The launcher reopens the dashboard once the server is back, so the browser's own "no internet" page can't stay up.
+- **No clock after a power cut:** a Pi can't keep time while unplugged, so the TV page takes the time from the server.
+- **Help for every case** is on the **Help** page of the settings, in plain steps.
+
+To put the latest TV software on an installed Pi, run `git pull && sudo ./pi/install-display.sh && sudo reboot` in the project folder on it. It keeps the address and key it has.
+
 ## Development
 
 ```bash

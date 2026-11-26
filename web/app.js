@@ -714,11 +714,29 @@
 
   // ---------- Data ----------
 
+  // A Pi has no clock of its own: after a power cut with no internet it wakes up thinking it is the time it was
+  // switched off. The server's clock is right, so the page follows it whenever the two disagree by over a minute.
+  const RealDate = Date;
+  let skew = 0;
+  class SkewDate extends RealDate {
+    constructor(...a) { if (a.length === 0) super(RealDate.now() + skew); else super(...a); }
+    static now() { return RealDate.now() + skew; }
+  }
+  window.Date = SkewDate;
+  function learnClock(r) {
+    const h = r.headers && r.headers.get("Date"), t = h ? RealDate.parse(h) : NaN;
+    if (!isNaN(t)) {
+      const off = t - RealDate.now();
+      if (Math.abs(off) > 60000 || skew) skew = Math.abs(off) > 5000 ? off : 0;    // a small drift isn't worth chasing
+    }
+  }
+
   async function getJSON(url, timeoutMs) {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), timeoutMs || 20000);
     try {
       const r = await fetch(url, { signal: ctl.signal, cache: "no-store" });
+      learnClock(r);
       if (!r.ok) {
         let msg = `HTTP ${r.status}`;
         try { const j = await r.json(); if (j && j.error) msg = j.error; } catch (_) { /* keep status */ }

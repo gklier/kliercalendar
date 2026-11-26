@@ -8,7 +8,7 @@
 # whether the screen should be asleep (Settings → Schedule); this script switches
 # the HDMI output and the TV to match.
 DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]:-$0}")")/.." && pwd)"
-WAITING_PAGE="data:text/html,<body style='background:%230B1626;color:%23aaa;font:600 32px sans-serif;display:grid;place-items:center;height:100vh;margin:0'>Waiting for the family dashboard server..."
+WAITING_PAGE="data:text/html,<body style='background:%230B1626;color:%23aaa;font:600 32px sans-serif;display:grid;place-items:center;height:100vh;margin:0;text-align:center'>Waiting for the family dashboard server...<br><small style='font-weight:400;font-size:22px'>It will appear by itself as soon as it is reachable.</small>"
 # shellcheck source=/dev/null
 source "$DIR/data/kiosk.env"      # CMD=(browser args with __URL__), PORT[, SERVER, TV_KEY]
 SERVER="${SERVER:-http://localhost:${PORT:-8080}}"
@@ -93,12 +93,17 @@ while true; do
   for t in "${CMD[@]}"; do args+=("${t//__URL__/"$url"}"); done
   setsid "${args[@]}" &      # own process group, so all browser helpers stop together
   pid=$!
+  miss=0
 
   while kill -0 "$pid" 2>/dev/null; do
     sleep "${KIOSK_POLL:-5}"
-    new=$(ask) || continue   # server busy or restarting: keep showing what's there
+    new=$(ask) || { miss=$((miss + 1)); continue; }   # server busy or restarting: keep showing what's there
     sync_screen "$new"
-    if [ -n "$new" ] && [ "$(page_of "$new")" != "$(page_of "$answer")" ]; then
+    # The server was out of reach for a while (power or network outage) and is back. A browser that was
+    # opened while it was away may be showing its own "no internet" page, so open the dashboard again.
+    back=0; (( miss >= ${KIOSK_RECOVER_AFTER:-12} )) && back=1
+    miss=0
+    if [ -n "$new" ] && { [ "$back" = 1 ] || [ "$(page_of "$new")" != "$(page_of "$answer")" ]; }; then
       answer="$new"
       kill -TERM -- "-$pid" 2>/dev/null
       wait "$pid" 2>/dev/null

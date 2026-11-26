@@ -10,7 +10,8 @@
 #
 # Optional: DISPLAY_MODE=1920x1080@60 (empty = the TV's own choice, often 4K at 30 Hz).
 # When the screen sleeps is set on the server (Settings → Schedule), not here.
-# Safe to run again to change any of these.
+# Safe to run again to change any of these. To update an installed TV, run it again without the two
+# settings above: it keeps the server address and key it already has.
 set -euo pipefail
 if [[ $EUID -ne 0 ]]; then echo "Run with sudo: sudo ./pi/install-display.sh" >&2; exit 1; fi
 
@@ -21,6 +22,9 @@ SERVER_URL="${DASHBOARD_SERVER:-}"
 TV_KEY="${DASHBOARD_TV_KEY:-}"
 DISPLAY_MODE="${DISPLAY_MODE-1920x1080@60}"
 
+KEEP="${DASHBOARD_DIR:-/opt/family-dashboard}/data/kiosk.env"
+if [[ -z "$SERVER_URL" && -r "$KEEP" ]]; then SERVER_URL="$(sed -n "s/^SERVER=//p" "$KEEP" | head -n1 | tr -d "'\"")"; fi
+if [[ -z "$TV_KEY" && -r "$KEEP" ]]; then TV_KEY="$(sed -n "s/^TV_KEY=//p" "$KEEP" | head -n1 | tr -d "'\"")"; fi
 [[ -n "$SERVER_URL" && -n "$TV_KEY" ]] || { echo "Set DASHBOARD_SERVER and DASHBOARD_TV_KEY (make the key in Settings → On the TV)." >&2; exit 1; }
 id "$RUN_USER" >/dev/null 2>&1 || { echo "No user $RUN_USER. Run with sudo from the Pi's normal user, or set DASHBOARD_USER." >&2; exit 1; }
 [[ -z "$DISPLAY_MODE" || "$DISPLAY_MODE" =~ ^[0-9]{3,4}x[0-9]{3,4}@[0-9]{2,3}$ ]] || { echo "DISPLAY_MODE looks like 1920x1080@60, not $DISPLAY_MODE" >&2; exit 1; }
@@ -99,10 +103,37 @@ if [[ -z "$cur" || "$cur" == 00 ]] && command -v raspi-config >/dev/null; then
 fi
 if systemctl is-active --quiet NetworkManager 2>/dev/null; then
   mkdir -p /etc/NetworkManager/conf.d
-  printf '[connection]\nwifi.powersave = 2\n' > /etc/NetworkManager/conf.d/99-family-tv-wifi.conf
+  # Never give up on the saved Wi-Fi: by default NetworkManager stops after a few tries, and a Pi that starts
+  # while the router is still without power would then stay offline until someone restarted it
+  printf '[connection]\nwifi.powersave = 2\nconnection.autoconnect-retries = 0\n' > /etc/NetworkManager/conf.d/99-family-tv-wifi.conf
   iw dev wlan0 set power_save off >/dev/null 2>&1 || true
   echo "Wi-Fi power saving off."
 fi
+
+echo "==> Keeping the network alive (router outages)"
+cat > /etc/systemd/system/family-tv-net.service <<EOF
+[Unit]
+Description=Family Dashboard TV: check the home network connection
+
+[Service]
+Type=oneshot
+ExecStart=$DIR/pi/netwatch.sh
+EOF
+cat > /etc/systemd/system/family-tv-net.timer <<'EOF'
+[Unit]
+Description=Check the TV's home network connection every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
+EOF
+systemctl daemon-reload
+systemctl enable --now family-tv-net.timer >/dev/null 2>&1 || true
+echo "If the Pi loses its router it reconnects by itself, and restarts itself as a last resort."
 
 echo "==> Screen size"
 CMDLINE=/boot/firmware/cmdline.txt

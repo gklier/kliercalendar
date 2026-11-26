@@ -13,6 +13,7 @@ These make the dashboard something nobody has to think about.
 | **Automatic backups, and restore from the settings page.** A nightly copy of the data folder, plus an upload button on the Backup page. | Backup is download-only now. A restore button turns a bad day into a two-minute fix. | M |
 | **Browser tests with screenshots.** Load the demo page in several states (`?busy=1` and friends), compare screenshots, run on every push. | The wrapping status strip was only caught by a person looking. | M |
 | **Continuous integration.** Run the server, chaos and Pi tests on every push, and keep dependencies up to date automatically. | Tests only help if they run. | S |
+| **Battery backup guidance and a hardware watchdog** for the Pi. | The network watchdog covers a lost router; a hardware watchdog would also cover a frozen Pi. | S |
 | **Nightly browser restart on the Pi** and a read-only system partition. | Chromium slowly grows; SD cards wear out. Both fixes are well known. | S |
 
 ## The screen itself

@@ -350,3 +350,16 @@ input[type="range"] { accent-color: var(--accent); }
 .keyrow { display: grid; gap: 6px; margin: 14px 0; }
 .keyrow pre { margin: 0; white-space: pre-wrap; word-break: break-all; user-select: all; }
 .keyrow button { justify-self: start; }
+
+.helplist { padding: 0; overflow: hidden; }
+details.help { border-top: 1px solid var(--line); }
+details.help:first-child { border-top: 0; }
+details.help summary { cursor: pointer; padding: 14px 44px 14px 18px; list-style: none; display: grid; gap: 3px; position: relative; }
+details.help summary::-webkit-details-marker { display: none; }
+details.help summary span { font-weight: 650; color: var(--ink); }
+details.help summary small { color: var(--ink-2); font-size: 13.5px; }
+details.help summary::after { content: "+"; position: absolute; right: 18px; top: 12px; font-size: 20px; color: var(--ink-2); }
+details.help[open] summary::after { content: "–"; }
+details.help summary:focus-visible { outline: 2px solid var(--accent, #0A84FF); outline-offset: -2px; }
+.helpbody { padding: 0 18px 16px; }
+.helpbody pre { white-space: pre-wrap; word-break: break-all; }
