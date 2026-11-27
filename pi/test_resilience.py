@@ -46,10 +46,17 @@ class WatchdogTest(unittest.TestCase):
         self.bin.mkdir()
         self.log = self.root / "calls.log"
         self.log.touch()
+        nmcli = """
+case "$*" in
+  "-t -f AUTOCONNECT-PRIORITY,NAME,TYPE connection show") printf '40:HomeWiFi:802-11-wireless\\n0:lo:loopback\\n60:HomeIoT:802-11-wireless\\n' ;;
+  "-t -f NAME,TYPE connection show --active") echo "HomeIoT:802-11-wireless" ;;
+  *) echo "nmcli $*" >> "$CALLS" ;;
+esac"""
         for name, body in {
             "ip": 'echo "default via 192.168.0.1 dev wlan0"',
             "ping": '[ -f "$FAKE_ROUTER_UP" ]',
-            "nmcli": 'if [ "$1" = -t ]; then echo "HomeWiFi:802-11-wireless"; echo "lo:loopback"; fi; echo "nmcli $*" >> "$CALLS"',
+            "curl": 'if [ -f "$FAKE_SERVER_UP" ]; then printf 401; else printf 000; exit 7; fi',
+            "nmcli": nmcli,
             "systemctl": 'echo "systemctl $*" >> "$CALLS"',
             "rfkill": 'echo "rfkill $*" >> "$CALLS"',
             "reboot": 'echo "reboot" >> "$CALLS"',
@@ -59,29 +66,37 @@ class WatchdogTest(unittest.TestCase):
             f.write_text("#!/bin/bash\n" + body + "\n")
             f.chmod(f.stat().st_mode | stat.S_IEXEC)
         self.router = self.root / "router-up"
+        self.server = self.root / "server-up"
+        self.envfile = self.root / "kiosk.env"
+        self.envfile.write_text("SERVER='http://dashboard.example:8080'\nTV_KEY='x'\n")
 
     def tearDown(self):
         self.tmp.cleanup()
 
     def run_watch(self, times=1):
-        env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "CALLS": str(self.log), "FAKE_ROUTER_UP": str(self.router),
-               "NETWATCH_STATE": str(self.root / "state"), "NETWATCH_STAMP": str(self.root / "stamp")}
+        env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}", "CALLS": str(self.log),
+               "FAKE_ROUTER_UP": str(self.router), "FAKE_SERVER_UP": str(self.server), "NETWATCH_ENV": str(self.envfile),
+               "NETWATCH_STATE": str(self.root / "state"), "NETWATCH_SERVER_STATE": str(self.root / "sstate"),
+               "NETWATCH_STAMP": str(self.root / "stamp")}
         for _ in range(times):
             subprocess.run(["bash", str(PI / "netwatch.sh")], env=env, check=True, capture_output=True)
 
     def calls(self):
         return self.log.read_text().splitlines()
 
+    # ---- the router
+
     def test_internet_outage_does_nothing(self):
-        self.router.touch()                    # the router answers; only the internet is gone (the script never looks)
-        self.run_watch(30)
+        self.router.touch()                    # router and server answer; only the internet is gone (never checked)
+        self.server.touch()
+        self.run_watch(40)
         self.assertEqual(self.calls(), [])
 
     def test_lost_router_is_handled_in_steps(self):
         self.run_watch(2)
         self.assertEqual(self.calls(), [])                                   # a couple of missed checks are nothing
         self.run_watch(1)
-        self.assertIn("nmcli connection up HomeWiFi", self.calls())          # 3: ask for the saved Wi-Fi again
+        self.assertIn("nmcli connection up HomeIoT", self.calls())           # 3: ask for the preferred saved Wi-Fi again
         self.assertNotIn("reboot", " ".join(self.calls()))
         self.run_watch(5)
         self.assertIn("systemctl restart NetworkManager", self.calls())      # 8: restart the network service
@@ -94,12 +109,44 @@ class WatchdogTest(unittest.TestCase):
         self.assertEqual(len(self.calls()), before)                          # never a second restart within the hour
 
     def test_coming_back_starts_the_count_again(self):
+        self.server.touch()
         self.run_watch(2)
         self.router.touch()
         self.run_watch(1)
         self.router.unlink()
         self.run_watch(2)
         self.assertEqual(self.calls(), [])                                   # 2 more misses, not 5
+
+    # ---- the dashboard server
+
+    def test_unreachable_server_is_handled_in_steps(self):
+        self.router.touch()                                                  # joined to Wi-Fi, but no way to the server
+        self.run_watch(4)
+        self.assertEqual(self.calls(), [])
+        self.run_watch(1)
+        self.assertEqual(self.calls(), ["nmcli connection up HomeIoT"])      # 5: join the current network again
+        self.run_watch(5)
+        self.assertEqual(self.calls()[-1], "nmcli connection up HomeWiFi")   # 10: try the other saved network
+        self.run_watch(10)
+        self.assertEqual(self.calls()[-1], "systemctl restart NetworkManager")   # 20: back to the preferred one
+        self.run_watch(40)
+        self.assertNotIn("reboot", " ".join(self.calls()))                   # never a restart of the Pi for this
+        self.assertEqual(self.calls().count("nmcli connection up HomeIoT"), 2)   # minutes 5 and 35: the steps repeat every 30
+
+    def test_server_answering_resets_the_count(self):
+        self.router.touch()
+        self.run_watch(4)
+        self.server.touch()
+        self.run_watch(1)
+        self.server.unlink()
+        self.run_watch(4)
+        self.assertEqual(self.calls(), [])
+
+    def test_server_on_the_pi_itself_is_not_checked(self):
+        self.router.touch()
+        self.envfile.write_text("PORT=8080\n")                              # no SERVER: the dashboard runs on this Pi
+        self.run_watch(25)
+        self.assertEqual(self.calls(), [])
 
 
 class LauncherRecoveryTest(unittest.TestCase):
