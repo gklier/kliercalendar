@@ -287,7 +287,7 @@ class DashboardTest(unittest.TestCase):
         cls.state = Path(cls.tmp.name) / "state"
         cls.state.mkdir()
         cls.app = server.App(server.Store(cfg_path), WEB, cls.state)
-        cls.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(cls.app))
+        cls.srv = server.DashboardHTTPServer(("127.0.0.1", 0), server.make_handler(cls.app))
         threading.Thread(target=cls.srv.serve_forever, daemon=True).start()
         cls.base = f"http://127.0.0.1:{cls.srv.server_port}"
 
@@ -884,7 +884,7 @@ class OffsiteTest(unittest.TestCase):
         cfg.write_text(json.dumps({}))
         (Path(self.tmp.name) / "state").mkdir()
         self.app = server.App(server.Store(cfg), WEB, Path(self.tmp.name) / "state", offsite=True)
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(self.app))
+        self.srv = server.DashboardHTTPServer(("127.0.0.1", 0), server.make_handler(self.app))
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.base = f"http://127.0.0.1:{self.srv.server_port}"
 
@@ -1091,6 +1091,12 @@ class SettingsValidationTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             server.apply_settings(self.base, patch)
         self.assertIn(words, str(ctx.exception))
+
+    def test_calendar_first_day(self):
+        self.assertEqual(self.base["display"]["calStart"], "today")
+        c = server.apply_settings(self.base, {"display": {"calStart": "sunday"}})
+        self.assertEqual(c["display"]["calStart"], "sunday")
+        self.bad({"display": {"calStart": "monday"}}, "First day shown")
 
     def test_rejects(self):
         self.bad({"calendar": {"calendars": [{"name": "A", "color": "red"}]}}, "colour")

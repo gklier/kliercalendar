@@ -402,6 +402,13 @@
       </div>
 
       <form id="cal-form" novalidate>
+        <h2>On the TV</h2>
+        <div class="group"><div class="item"><label for="cal-start">First day shown</label>
+          <select id="cal-start">
+            <option value="today" ${settings.display.calStart !== "sunday" ? "selected" : ""}>Today, then the days after it</option>
+            <option value="sunday" ${settings.display.calStart === "sunday" ? "selected" : ""}>Sunday, as a week (days already gone are dimmed)</option>
+          </select></div></div>
+
         <h2>From the Google account</h2>
         <div class="group" id="gcals">${google.length ? google.map((c) => calRow(c, st[c.id])).join("") : `<div class="item"><span class="label">None yet</span><span class="sub" style="grid-column:2">Connect the account above to list its calendars.</span></div>`}</div>
 
@@ -451,6 +458,7 @@
     });
 
     bindSave($("#cal-form"), () => ({
+      display: { calStart: $("#cal-start").value },
       calendar: {
         calendars: $$(".cal", page).map((row) => ({
           id: row.dataset.id || undefined,

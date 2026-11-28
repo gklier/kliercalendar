@@ -359,10 +359,12 @@
   }
 
   function evHTML(ev, day, now) {
-    if (ev.allDay) return `<div class="ev allday${isLight(ev.color) ? " light" : ""}" style="${paint(ev, "90deg")}">${esc(ev.title)}</div>`;
+    const light = isLight(ev.color) ? " light" : "";
+    if (ev.allDay) return `<div class="ev allday${light}" style="${paint(ev, "90deg")}">${esc(ev.title)}</div>`;
     const startsHere = sameDay(ev.s, day);
     const done = ev.e < now ? " done" : "";
-    return `<div class="ev${done}" style="${paint(ev)}"><span class="bar"></span><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span class="ti">${esc(ev.title)}</span></span></div>`;
+    // The whole event is filled with its person's colour (several people: their colours side by side)
+    return `<div class="ev filled${done}${light}" style="${paint(ev, "90deg")}"><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span class="ti">${esc(ev.title)}</span></span></div>`;
   }
 
   // Remove events from the bottom until the box fits, then say how many are hidden
@@ -382,21 +384,27 @@
     const now = new Date(), today = startOfDay(now);
     const grid = $("cal-grid");
     const days = [7, 14, 21, 28].includes(widgetOpt("calendar", "days", 14)) ? widgetOpt("calendar", "days", 14) : 14;
+    // The first day shown: today, or this week's Sunday (then the days already gone this week show too, dimmed)
+    const weekly = cfg.calStart === "sunday";
+    const first = weekly ? addDays(today, -today.getDay()) : today;
     // A narrow calendar box uses fewer, wider columns (about 175px a day or more) so the text stays readable
     const fit = Math.max(2, Math.min(7, Math.floor((grid.clientWidth || 1400) / 175)));
     const rows = Math.ceil(days / fit), cols = Math.ceil(days / rows);
     grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
     grid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-    const title = days === 7 ? "Next week" : days === 14 ? "Next two weeks" : days === 21 ? "Next three weeks" : "Next four weeks";
+    const title = weekly
+      ? (days === 7 ? "This week" : days === 14 ? "This week and next" : days === 21 ? "Three weeks" : "Four weeks")
+      : (days === 7 ? "Next week" : days === 14 ? "Next two weeks" : days === 21 ? "Next three weeks" : "Next four weeks");
     const h = document.querySelector(".cal-top h2");
     if (h && h.textContent !== title) { h.textContent = title; h.closest("section").setAttribute("aria-label", title); }
     let html = "";
     for (let i = 0; i < days; i++) {
-      const d = addDays(today, i);
+      const d = addDays(first, i);
+      const rel = Math.round((d - today) / 86400000);
       const weekend = d.getDay() === 0 || d.getDay() === 6;
       const mo = i === 0 || d.getDate() === 1 ? `<span class="mo">${d.toLocaleDateString([], { month: "short" })}</span>` : "";
-      const dow = i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString([], { weekday: "short" });
-      html += `<div class="day${i === 0 ? " today" : ""}${weekend ? " weekend" : ""}">
+      const dow = rel === 0 ? "Today" : rel === 1 ? "Tomorrow" : d.toLocaleDateString([], { weekday: "short" });
+      html += `<div class="day${rel === 0 ? " today" : ""}${rel < 0 ? " gone" : ""}${weekend ? " weekend" : ""}">
         <div class="day-head"><span class="dow">${dow}</span><span class="n">${d.getDate()}</span>${mo}</div>
         ${eventsOn(d).map((ev) => evHTML(ev, d, now)).join("")}
       </div>`;

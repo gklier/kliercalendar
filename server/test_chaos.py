@@ -101,7 +101,7 @@ class Boot:
             self.cfg.write_text(config if isinstance(config, str) else json.dumps(config))
         (self.root / "state").mkdir()
         self.app = server.App(server.Store(self.cfg), WEB, self.root / "state", offsite=offsite)
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), server.make_handler(self.app))
+        self.srv = server.DashboardHTTPServer(("127.0.0.1", 0), server.make_handler(self.app))
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
         self.port = self.srv.server_port
         self.base = f"http://127.0.0.1:{self.port}"

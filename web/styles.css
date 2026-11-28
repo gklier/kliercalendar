@@ -299,6 +299,12 @@ body.free .stage { display: block; }
 .ev .tm { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 5px; }
 .ev .ti { font-weight: 500; }
 .ev.done { opacity: 0.42; }
+/* A timed event filled with its person's colour */
+.ev.filled { display: block; background: var(--paint, var(--c)); color: #FFFFFF; border-radius: 7px; padding: 3px 8px; line-height: 18px; }
+.ev.filled.light { color: #1C1C1E; }
+.ev.filled .tm { color: inherit; opacity: 0.85; }
+.ev.filled .ti { font-weight: 600; }
+.day.gone { opacity: 0.55; }
 
 .ev.allday { display: block; background: var(--paint, var(--c)); border-radius: 7px; padding: 2px 8px; font-size: 14px; font-weight: 650; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #FFFFFF; }
 .ev.allday.light { color: #1C1C1E; }

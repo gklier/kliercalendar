@@ -161,6 +161,7 @@ DEFAULT_CONFIG: dict = {
         "timeFormat": "12h", "perf": "auto", "shareOnNetwork": False,
         "nightDim": {"enabled": True, "start": "22:30", "end": "06:00", "level": 0.6},
         "dailyReload": "03:30", "burnInShift": True,
+        "calStart": "today",                # the calendar's first day: today, or this week's Sunday
         "background": "sky", "photoMinutes": 10,
         "bgPhoto": "", "bgColor": "#0B1626", "photoDim": 30, "appearance": "auto", "bgPreset": "",
         "bgGradient": {"a": "#1B2A49", "b": "#4B2E6F", "angle": 160},
@@ -596,6 +597,8 @@ def _apply_settings(current: dict, patch: dict) -> dict:
             disp["timeFormat"] = _choice(s["timeFormat"], "Clock style", {"12h", "24h"})
         if "perf" in s:
             disp["perf"] = _choice(s["perf"], "Render quality", {"auto", "lite", "full"})
+        if "calStart" in s:
+            disp["calStart"] = _choice(s["calStart"], "First day shown", {"today", "sunday"})
         if "shareOnNetwork" in s:
             disp["shareOnNetwork"] = bool(s["shareOnNetwork"])
         if "background" in s:
@@ -951,7 +954,7 @@ def merge_copies(events: list[dict]) -> list[dict]:
 
 
 class Calendars:
-    def __init__(self, calendars: list[dict], tz: ZoneInfo, days_back: int = 1, days_ahead: int = 16,
+    def __init__(self, calendars: list[dict], tz: ZoneInfo, days_back: int = 7, days_ahead: int = 30,
                  account: dict | None = None):
         self.account = account or {}
         self.calendars = [c for c in calendars if c.get("enabled", True) and (c.get("ics_url") or c.get("href"))]
@@ -2065,6 +2068,13 @@ def is_loopback(ip: str) -> bool:
         return False
 
 
+class DashboardHTTPServer(ThreadingHTTPServer):
+    """The web server. Several screens poll it every few seconds (camera pictures especially), so it keeps
+    a longer queue of waiting connections than the default of 5, which some systems answer with a reset."""
+    request_queue_size = 128
+    daemon_threads = True
+
+
 def make_handler(app: App):
     class Handler(BaseHTTPRequestHandler):
         server_version = "FamilyDashboard/2.0"
@@ -2462,7 +2472,7 @@ def main(argv: list[str] | None = None) -> None:
     port = args.port or int(store.data.get("port", 8080))
     store.data["port"] = port
     threading.Thread(target=keep_warm, args=(app,), daemon=True).start()
-    httpd = ThreadingHTTPServer((host, port), make_handler(app))
+    httpd = DashboardHTTPServer((host, port), make_handler(app))
     log.info("Family Dashboard on http://%s:%d (settings at /admin/)%s", host, port,
              " — off-site mode: the TV signs in with its key" if args.offsite else "")
     try:
