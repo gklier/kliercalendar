@@ -299,11 +299,12 @@ body.free .stage { display: block; }
 .ev .tm { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 5px; }
 .ev .ti { font-weight: 500; }
 .ev.done { opacity: 0.42; }
-/* A timed event filled with its person's colour */
-.ev.filled { display: block; background: var(--paint, var(--c)); color: #FFFFFF; border-radius: 7px; padding: 3px 8px; line-height: 18px; }
-.ev.filled.light { color: #1C1C1E; }
-.ev.filled .tm { color: inherit; opacity: 0.85; }
-.ev.filled .ti { font-weight: 600; }
+/* A timed event outlined in its person's colour; all-day events stay filled, so the two read apart.
+   The outline is the colour (or colours) painted behind, with the inside cut out by a padding box. */
+.ev.outlined { display: block; position: relative; border-radius: 7px; padding: 3px 8px; line-height: 18px; }
+.ev.outlined::before { content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 2px; background: var(--paint, var(--c)); pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+.ev.outlined .ti { font-weight: 600; }
 .day.gone { opacity: 0.55; }
 
 .ev.allday { display: block; background: var(--paint, var(--c)); border-radius: 7px; padding: 2px 8px; font-size: 14px; font-weight: 650; line-height: 19px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #FFFFFF; }

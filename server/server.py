@@ -1532,6 +1532,7 @@ class HomeAssistant:
         self.cfg, self.tz = cfg, tz
         self.lock = threading.Lock()
         self.snaps: dict[str, tuple[float, bytes, str]] = {}
+        self.snap_gates: dict[str, threading.Lock] = {}
         self.motion_since: dict[str, float] = {}
         self.motion_last: dict[str, float] = {}
 
@@ -1662,15 +1663,25 @@ class HomeAssistant:
         key = f"{camera_id}|{width or 0}"
         with self.lock:
             hit = self.snaps.get(key)
-        if hit and time.time() - hit[0] < 1.0:
-            return hit[1], hit[2]
-        path = f"/api/camera_proxy/{camera_id}" + (f"?width={width}&height={round(width * 9 / 16)}" if width else "")
-        blob = self._get(path, timeout=10, max_bytes=8_000_000)
-        ctype = "image/png" if blob[:4] == b"\x89PNG" else "image/jpeg"
-        with self.lock:
-            self.snaps[key] = (time.time(), blob, ctype)
-        return blob, ctype
+            if hit and time.time() - hit[0] < SNAPSHOT_SHARE:
+                return hit[1], hit[2]
+            gate = self.snap_gates.setdefault(key, threading.Lock())
+        with gate:                                   # one fetch per picture: the others wait for it and share it
+            with self.lock:
+                hit = self.snaps.get(key)
+            if hit and time.time() - hit[0] < SNAPSHOT_SHARE:
+                return hit[1], hit[2]
+            path = f"/api/camera_proxy/{camera_id}" + (f"?width={width}&height={round(width * 9 / 16)}" if width else "")
+            blob = self._get(path, timeout=10, max_bytes=8_000_000)
+            ctype = "image/png" if blob[:4] == b"\x89PNG" else "image/jpeg"
+            with self.lock:
+                self.snaps[key] = (time.time(), blob, ctype)
+            return blob, ctype
 
+
+# A camera picture is shared this long (seconds) between screens asking at once. Short enough for a few
+# frames a second, long enough that two TVs don't double the load on the camera.
+SNAPSHOT_SHARE = 0.25
 
 VIRTUAL = re.compile(r"(https?://|zoom\.us|meet\.google|teams\.microsoft|webex)", re.I)
 

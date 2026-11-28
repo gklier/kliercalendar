@@ -701,6 +701,25 @@ class DashboardTest(unittest.TestCase):
         finally:
             self.app.save(before)
 
+    def test_ha_snapshot_shared_between_screens(self):
+        c = self.signed_in()
+        before = server.copy.deepcopy(self.app.config)
+        try:
+            self.ha_connect(c, cameras=[{"id": "camera.front", "name": "Front", "motion": []}], entities=[])
+            self.app.ha.snaps.clear()
+            Upstream.proxy_paths.clear()
+            codes = []
+            ts = [threading.Thread(target=lambda: codes.append(c.call("/api/ha/camera/camera.front.jpg?w=640")[0])) for _ in range(6)]
+            [t.start() for t in ts]
+            [t.join(10) for t in ts]
+            self.assertEqual(codes, [200] * 6)
+            self.assertEqual(len(Upstream.proxy_paths), 1)         # six screens at once, one picture from the camera
+            time.sleep(server.SNAPSHOT_SHARE + 0.05)
+            self.assertEqual(c.call("/api/ha/camera/camera.front.jpg?w=640")[0], 200)
+            self.assertEqual(len(Upstream.proxy_paths), 2)         # and a fresh one shortly after, for the next frame
+        finally:
+            self.app.save(before)
+
     def test_ha_new_token_switches_it_on(self):
         base = server.deep_merge(server.DEFAULT_CONFIG, {})
         cfg = server.apply_settings(base, {"ha": {"url": "http://ha.example:8123", "token": "x" * 40}})

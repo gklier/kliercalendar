@@ -69,6 +69,12 @@
     const stops = cs.map((c, i) => `${c} ${(i * step).toFixed(1)}% ${((i + 1) * step).toFixed(1)}%`).join(", ");
     return `--c:${cs[0]};--paint:linear-gradient(${dir || "180deg"}, ${stops})`;
   }
+  // Text in the person's colour (several people: the colours run across the letters)
+  function tint(ev) {
+    const cs = (ev.colors && ev.colors.length ? ev.colors : [ev.color || "#0A84FF"]).slice(0, 4).map(esc);
+    if (cs.length === 1) return `color:${cs[0]}`;
+    return `color:${cs[0]};background:linear-gradient(90deg, ${cs.join(", ")});-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent`;
+  }
   const who = (ev) => (ev.calendars && ev.calendars.length ? ev.calendars : [ev.calendar]).join(", ");
 
   // ---------- Stage ----------
@@ -363,8 +369,8 @@
     if (ev.allDay) return `<div class="ev allday${light}" style="${paint(ev, "90deg")}">${esc(ev.title)}</div>`;
     const startsHere = sameDay(ev.s, day);
     const done = ev.e < now ? " done" : "";
-    // The whole event is filled with its person's colour (several people: their colours side by side)
-    return `<div class="ev filled${done}${light}" style="${paint(ev, "90deg")}"><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span class="ti">${esc(ev.title)}</span></span></div>`;
+    // Outlined in its person's colour (all-day events are the filled ones), several people side by side
+    return `<div class="ev outlined${done}" style="${paint(ev, "90deg")}"><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span class="ti">${esc(ev.title)}</span></span></div>`;
   }
 
   // Remove events from the bottom until the box fits, then say how many are hidden
@@ -474,7 +480,7 @@
       const started = featured.s <= now;
       next = `<div class="next" style="${paint(featured)}">
         <div class="next-when"><span class="next-time">${fmtTime(featured.s)}</span><span class="next-in">${started ? `now, until ${fmtTime(featured.e)}` : countdown(featured.s - now)}</span></div>
-        <div class="next-title">${esc(featured.title)}</div>
+        <div class="next-title" style="${tint(featured)}">${esc(featured.title)}</div>
         <div class="next-who">${esc(who(featured))}</div>
         ${featured.location ? `<div class="next-where">${esc(featured.location)}</div>` : ""}
         ${started ? "" : leaveHTML(featured, now)}
@@ -487,7 +493,7 @@
       return `<div class="row${cls}" style="${paint(ev)}">
         <div class="t">${ev.s <= now && ev.e > now ? "Now" : sameDay(ev.s, day) ? fmtTime(ev.s) : "cont."}</div>
         <div class="bar"></div>
-        <div><div class="ti">${esc(ev.title)}</div><div class="meta">${esc(who(ev))}</div></div>
+        <div><div class="ti" style="${tint(ev)}">${esc(ev.title)}</div><div class="meta">${esc(who(ev))}</div></div>
         ${ev.s > now ? rowLeave(ev, now) : ""}
       </div>`;
     }).join("");
@@ -643,12 +649,24 @@
     probe.src = camURL(id, w);
   }
 
+  // Live-ish pictures: each one asks for the next as soon as it is on screen, but no faster than `ms`
+  // apart. A slow camera or a busy TV simply gets fewer frames; nothing piles up. `gen` stops old loops.
+  function cameraLoop(state, img, id, ms, width) {
+    const gen = state.gen;
+    const next = () => {
+      if (gen !== state.gen || document.hidden) return;
+      const t0 = performance.now();
+      showPicture(img, id, () => setTimeout(next, Math.max(120, ms - (performance.now() - t0))), width);
+    };
+    return next;
+  }
+
   // The camera tile: the camera chosen for it in Layout, or every camera in turn
-  const tile = { i: 0, timer: 0, last: 0 };
+  const tile = { i: 0, timer: 0, last: 0, gen: 0, cam: null };
   function tickCamera() {
     clearTimeout(tile.timer);
     const el = $("camera"), w = layoutOf("camera");
-    if (!el || !w || w.visible === false || !(cfg.ha && cfg.ha.cameras)) return;
+    if (!el || !w || w.visible === false || !(cfg.ha && cfg.ha.cameras)) { tile.gen++; tile.cam = null; return; }
     tile.timer = setTimeout(tickCamera, 2000);
     const cams = camList();
     if (!cams.length) { el.querySelector(".cam-name").textContent = "No camera chosen"; return; }
@@ -659,37 +677,43 @@
       cam = cams[tile.i % cams.length];
     }
     el.querySelector(".cam-name").textContent = cam.name;
-    showPicture(el.querySelector("img"), cam.id);
+    if (tile.cam !== cam.id) {                               // a new camera: start its picture loop
+      tile.cam = cam.id; tile.gen++;
+      cameraLoop(tile, el.querySelector("img"), cam.id, 400)();
+    }
   }
 
   // The camera wall: up to four cameras at once (the ones picked in Layout, else the first four)
-  const wall = { timer: 0 };
+  const wall = { timer: 0, gen: 0, key: "" };
   function tickWall() {
     clearTimeout(wall.timer);
     const el = $("camwall"), w = layoutOf("camwall");
-    if (!el || !w || w.visible === false || !(cfg.ha && cfg.ha.cameras)) return;
-    wall.timer = setTimeout(tickWall, 2000);
+    if (!el || !w || w.visible === false || !(cfg.ha && cfg.ha.cameras)) { wall.gen++; wall.key = ""; return; }
+    wall.timer = setTimeout(tickWall, 2000);                 // names, picks and motion outlines; the pictures run on their own
     const all = camList(), picked = widgetOpt("camwall", "cameras", []);
     const cams = (picked.length ? picked.map((id) => all.find((c) => c.id === id)).filter(Boolean) : all).slice(0, 4);
-    const cells = el.querySelectorAll(".wall-cell");
+    const cells = [...el.querySelectorAll(".wall-cell")];
+    const widths = cells.map((cell) => Math.min(1280, Math.max(480, Math.ceil(cell.offsetWidth / 160) * 160)));   // a big wall asks for sharper pictures
+    const key = cams.map((c) => c.id).join(",") + "|" + widths.join(",");
     cells.forEach((cell, n) => {
       const cam = cams[n];
       cell.classList.toggle("empty", !cam);
       if (!cam) return;
       cell.querySelector(".cam-name").textContent = cam.name;
       cell.classList.toggle("moving", !!cam.active);
-      const wide = Math.min(1280, Math.max(480, Math.ceil(cell.offsetWidth / 160) * 160));   // a big wall asks for sharper pictures
-      setTimeout(() => showPicture(cell.querySelector("img"), cam.id, null, wide), n * 450);   // one camera at a time, not all four at once
     });
+    if (key === wall.key) return;
+    wall.key = key; wall.gen++;
+    // About two frames a second each, started a little apart so the four don't arrive at the same moment
+    cells.forEach((cell, n) => { const cam = cams[n]; if (cam) setTimeout(cameraLoop(wall, cell.querySelector("img"), cam.id, 500, widths[n]), n * 120); });
   }
 
   // The motion pop-up: a big picture that closes itself a while after the motion stops
-  const pop = { id: null, timer: 0 };
+  const pop = { id: null, timer: 0, gen: 0 };
   function tickPopup() {
-    clearTimeout(pop.timer);
+    pop.gen++;
     if (!pop.id) return;
-    pop.timer = setTimeout(tickPopup, 1000);
-    showPicture($("cam-popup").querySelector("img"), pop.id, null, 1280);
+    cameraLoop(pop, $("cam-popup").querySelector("img"), pop.id, 330, 1280)();   // the pop-up is the one to watch: about three a second
   }
   function renderCameras() {
     const c = state.cameras, el = $("cam-popup");
@@ -699,7 +723,7 @@
       $("cam-popup").querySelector(".pop-name").textContent = live[0].name;
       if (pop.id !== live[0].id) { pop.id = live[0].id; el.hidden = false; tickPopup(); }
     } else if (pop.id) {
-      pop.id = null; clearTimeout(pop.timer); el.hidden = true;
+      pop.id = null; pop.gen++; el.hidden = true;
     }
     if (!tile.timer) tickCamera();
     if (!wall.timer) tickWall();
@@ -857,6 +881,11 @@
       setInterval(() => { state.shift = { x: Math.round(Math.random() * 8 - 4), y: Math.round(Math.random() * 8 - 4) }; fit(); }, 15 * 60000);
     }
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) return;
+    tile.cam = null; wall.key = ""; tickCamera(); tickWall(); if (pop.id) tickPopup();
+  });
 
   // The Layout editor in Settings shows this page in a frame and sends it the layout being edited
   addEventListener("message", (e) => {
