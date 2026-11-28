@@ -169,7 +169,7 @@ sudo reboot</code></pre></li>
     </div>`;
   };
 
-  // Plain SVG, themed with the page's own colours
+  // Plain SVG, themed with the page's own colors
   function diagram() {
     const box = (x, y, w, h, title, sub, cls = "") => `<g class="${cls}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="12"/><text x="${x + w / 2}" y="${y + 24}" class="t">${title}</text>${(sub || []).map((s, k) => `<text x="${x + w / 2}" y="${y + 44 + k * 17}" class="s">${s}</text>`).join("")}</g>`;
     return `<svg viewBox="0 0 780 360" role="img" aria-label="Architecture: outside services feed the dashboard server, which serves the TV and the settings site." class="arch">

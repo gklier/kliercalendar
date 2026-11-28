@@ -53,7 +53,7 @@ html, body {
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "cv11", "ss01";
   cursor: none;
-  /* No background fade: a 90 s colour transition repaints the whole screen every frame
+  /* No background fade: a 90 s color transition repaints the whole screen every frame
      (12 fps on a Pi 4 for the first minute and a half). The sky changes in steps instead. */
 }
 
@@ -299,10 +299,10 @@ body.free .stage { display: block; }
 .ev .tm { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 5px; }
 .ev .ti { font-weight: 500; }
 .ev.done { opacity: 0.42; }
-/* A timed event: its title in the person's colour, no bar or box. All-day events stay filled. */
+/* A timed event: its title in the person's color, no bar or box. All-day events stay filled. */
 .ev.plain { display: block; padding: 1px 2px; }
 .ev.plain .ti { font-weight: 600; }
-/* Text in a person's colour (see tint() in app.js); darkened on a light background so it stays readable */
+/* Text in a person's color (see tint() in app.js); darkened on a light background so it stays readable */
 .tint { color: var(--t); }
 .tint.multi { background: var(--tg); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 body.light .tint { color: color-mix(in srgb, var(--t) 58%, #000); }

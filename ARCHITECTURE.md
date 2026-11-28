@@ -62,7 +62,7 @@ Standard-library `ThreadingHTTPServer`; the packages are `icalendar`, `recurring
 | `apply_settings()` | The only way settings change: validates a patch (`_str`, `_int`, `_choice`, `_layout`, `_schedule_rules`, …) and returns a new config or raises `ValueError` |
 | `public_settings()` | What the settings site sees: every secret replaced by "set or not" |
 | `Source` | A cache with *stale on error* and a 60 s back-off; one per data feed |
-| `HomeAssistant` | Reads Home Assistant's REST API with a token the server keeps: status tiles (`ha_describe()` decides the wording and colour), which cameras have motion, and still pictures from the chosen cameras |
+| `HomeAssistant` | Reads Home Assistant's REST API with a token the server keeps: status tiles (`ha_describe()` decides the wording and color), which cameras have motion, and still pictures from the chosen cameras |
 | `Weather`, `Calendars`, `Drive`, `Stocks` | Fetch and normalise Tempest, CalDAV/iCal, Google Routes and Yahoo Finance (through the `yfinance` package) |
 | `MapsBudget` | Counts Google Maps reads on disk; each day may use what's left divided by the days left in the month |
 | `merge_copies()` | One event per thing: copies with the same title, start and end become one, listing every calendar |
@@ -107,7 +107,7 @@ Top-level keys: `timezone`, `home`, `tempest`, `calendar` (account and calendars
 - **Free layout.** If `layout` is set, each widget is placed absolutely from its box. Widgets with a fixed design scale their contents with CSS `zoom`; the calendar and Today panel keep their text size and fit more or fewer days instead. The settings site previews edits by `postMessage` to a frame running this same page.
 - **Backgrounds.** `sky` (palettes by sunrise, sunset and weather), `photos`, `photo`, `gradient`, `color`; the *appearance* setting pins light or dark.
 - **Resilience.** Each feed renders from its last good data and says how old it is. The page measures its own frame rate, reports it, and turns the glass blur off by itself if it can't keep up.
-- **Performance rules learned the hard way:** never animate a full-screen background colour (it repaints the whole screen every frame), keep the animated ticker in its own layer, and run the Pi's video at 1080p.
+- **Performance rules learned the hard way:** never animate a full-screen background color (it repaints the whole screen every frame), keep the animated ticker in its own layer, and run the Pi's video at 1080p.
 
 ## The settings site (`web/admin/`)
 

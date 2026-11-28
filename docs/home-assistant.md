@@ -13,7 +13,7 @@ Choosing what shows (renaming tiles, removing things, switching pop-ups) is avai
 
 ## What shows
 
-| Thing | Tile says | Colour |
+| Thing | Tile says | Color |
 |---|---|---|
 | Lock | Locked, Unlocked, Jammed (and "Unlocked 12 min" once it's been that long) | green, red, red |
 | Door, window, garage door, gate | Closed, Open (and "Open 20 min") | green, amber, red |

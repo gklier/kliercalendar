@@ -4,7 +4,7 @@
    Components read only the role tokens below; a theme changes values, never structure. */
 
 :root {
-  /* Colour roles */
+  /* Color roles */
   --bg: #F2F2F7;
   --surface: #FFFFFF;
   --surface-2: #F2F2F7;

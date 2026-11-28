@@ -1169,7 +1169,7 @@ class SettingsValidationTest(unittest.TestCase):
         self.bad({"display": {"calStart": "monday"}}, "First day shown")
 
     def test_rejects(self):
-        self.bad({"calendar": {"calendars": [{"name": "A", "color": "red"}]}}, "colour")
+        self.bad({"calendar": {"calendars": [{"name": "A", "color": "red"}]}}, "color")
         self.bad({"calendar": {"calendars": [{"name": "A", "ics_url": "file:///etc/passwd"}]}}, "web link")
         self.bad({"tempest": {"station_id": "abc"}}, "Station ID")
         self.bad({"timezone": "Mars/Base"}, "time zone")

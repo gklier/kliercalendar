@@ -61,7 +61,7 @@
     return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2] > 0.45;
   }
 
-  // An event on several calendars shows every calendar's colour, in stripes
+  // An event on several calendars shows every calendar's color, in stripes
   function paint(ev, dir) {
     const cs = (ev.colors && ev.colors.length ? ev.colors : [ev.color || "#0A84FF"]).slice(0, 4).map(esc);
     if (cs.length === 1) return `--c:${cs[0]}`;
@@ -69,8 +69,8 @@
     const stops = cs.map((c, i) => `${c} ${(i * step).toFixed(1)}% ${((i + 1) * step).toFixed(1)}%`).join(", ");
     return `--c:${cs[0]};--paint:linear-gradient(${dir || "180deg"}, ${stops})`;
   }
-  // Text in the person's colour: returns class and style attributes. Several people: their colours run across
-  // the letters. On a light background the colour is darkened so it stays readable (styles.css, .tint).
+  // Text in the person's color: returns class and style attributes. Several people: their colors run across
+  // the letters. On a light background the color is darkened so it stays readable (styles.css, .tint).
   function tint(ev) {
     const cs = (ev.colors && ev.colors.length ? ev.colors : [ev.color || "#0A84FF"]).slice(0, 4).map(esc);
     if (cs.length === 1) return `class="tint" style="--t:${cs[0]}"`;
@@ -177,7 +177,7 @@
 
   // ---------- Sky ----------
 
-  // Dark skies at night, light ones between sunrise and sunset. Flat colours only.
+  // Dark skies at night, light ones between sunrise and sunset. Flat colors only.
   const SKY = {
     night: { sky: "#0B1626", a: "#1A3259", b: "#132A47", c: "#33496E" },
     dawn: { sky: "#36456E", a: "#8E5F86", b: "#4E5E91", c: "#E39A62" },
@@ -211,7 +211,7 @@
     else if (wet || grey) phase = "overcastNight";
     else phase = ms < rise && ms >= rise - H ? "dawn" : ms >= set && ms < set + H ? "dusk" : "night";
     document.body.classList.toggle("light", light);
-    if (customBg()) return;                                    // a chosen colour or gradient replaces the sky
+    if (customBg()) return;                                    // a chosen color or gradient replaces the sky
     const p = SKY[phase], root = document.documentElement.style;
     root.setProperty("--sky", p.sky);
     root.setProperty("--orb-a", p.a);
@@ -370,7 +370,7 @@
     if (ev.allDay) return `<div class="ev allday${light}" style="${paint(ev, "90deg")}">${esc(ev.title)}</div>`;
     const startsHere = sameDay(ev.s, day);
     const done = ev.e < now ? " done" : "";
-    // The title in its person's colour; all-day events are the filled ones, so the two read apart
+    // The title in its person's color; all-day events are the filled ones, so the two read apart
     return `<div class="ev plain${done}"><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span ${tint(ev)}><span class="ti">${esc(ev.title)}</span></span></span></div>`;
   }
 

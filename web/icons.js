@@ -1,4 +1,4 @@
-/* Weather + place glyphs. Flat multicolour, SF Symbols-inspired. No gradients. */
+/* Weather + place glyphs. Flat multicolor, SF Symbols-inspired. No gradients. */
 (function () {
   "use strict";
 

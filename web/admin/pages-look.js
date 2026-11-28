@@ -3,7 +3,7 @@
   "use strict";
   const FD = (window.FD = window.FD || { pages: {} });
 
-  // Gradients and colours, each with the appearance that reads best on it (dark text on light, white on dark)
+  // Gradients and colors, each with the appearance that reads best on it (dark text on light, white on dark)
   const GRADIENTS = [
     { id: "midnight", name: "Midnight", a: "#0B1626", b: "#1A3259", angle: 180, look: "dark" },
     { id: "aurora", name: "Aurora", a: "#0F2027", b: "#2C5364", angle: 160, look: "dark" },
@@ -57,8 +57,8 @@
       ["sky", "Weather sky", "Follows the time of day and the weather", "background:linear-gradient(160deg,#6FA8DC,#CFE2F6 55%,#F6CF72)"],
       ["photos", "Family photos", "A slideshow of your photos", "background:linear-gradient(135deg,#8E6B4F,#C9A27E 40%,#5E7C5B)"],
       ["photo", "One photo", "A single favourite", "background:linear-gradient(135deg,#3D5A80,#98C1D9 60%,#EE6C4D)"],
-      ["gradient", "Gradient", "Two colours blending", "background:linear-gradient(160deg,#0F2027,#2C5364)"],
-      ["color", "Solid colour", "One flat colour", "background:#14281D"],
+      ["gradient", "Gradient", "Two colors blending", "background:linear-gradient(160deg,#0F2027,#2C5364)"],
+      ["color", "Solid color", "One flat color", "background:#14281D"],
     ];
 
     function opts() {
@@ -69,13 +69,13 @@
           </div>
           <div class="group" style="margin-top:12px">
             <div class="item"><span class="label">Your own</span><div class="inline">
-              <input type="color" id="g-a" value="${esc(v.bgGradient.a)}" aria-label="First colour"><span>to</span>
-              <input type="color" id="g-b" value="${esc(v.bgGradient.b)}" aria-label="Second colour">
+              <input type="color" id="g-a" value="${esc(v.bgGradient.a)}" aria-label="First color"><span>to</span>
+              <input type="color" id="g-b" value="${esc(v.bgGradient.b)}" aria-label="Second color">
               <label class="tfield">Angle <input type="range" id="g-angle" min="0" max="359" value="${v.bgGradient.angle}" style="width:140px"></label></div></div>
           </div>`;
       }
       if (v.background === "color") {
-        return `<div class="swatches" role="radiogroup" aria-label="Colours">
+        return `<div class="swatches" role="radiogroup" aria-label="Colors">
             ${SOLIDS.map((s) => `<button type="button" class="swatch${v.bgColor === s.c ? " on" : ""}" data-solid="${s.c}" data-look="${s.look}" style="background:${s.c}" aria-label="${esc(s.name)}" aria-pressed="${v.bgColor === s.c}"><span>${esc(s.name)}</span></button>`).join("")}
           </div>
           <div class="group" style="margin-top:12px"><div class="item"><label for="c-own">Your own</label><div class="inline"><input type="color" id="c-own" value="${esc(v.bgColor)}"></div></div></div>`;

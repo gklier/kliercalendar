@@ -327,7 +327,7 @@ def load_yfinance():
         return _YF
 
 
-def _colour(v: Any, name: str) -> str:
+def _color(v: Any, name: str) -> str:
     if not isinstance(v, str) or not HEX.match(v):
         raise ValueError(f"{name} must look like #0B1626")
     return v.upper()
@@ -553,7 +553,7 @@ def _apply_settings(current: dict, patch: dict) -> dict:
                 raise ValueError(f"Calendar {i} needs a name")
             color = cal.get("color", "#0A84FF")
             if not isinstance(color, str) or not HEX.match(color):
-                raise ValueError(f"{name}: colour must look like #0A84FF")
+                raise ValueError(f"{name}: color must look like #0A84FF")
             entry = {"id": prev.get("id") or secrets.token_hex(4), "name": name, "color": color.upper(),
                      "enabled": bool(cal.get("enabled", True))}
             if prev.get("href"):  # from the Google account; only Refresh can add or move these
@@ -606,10 +606,10 @@ def _apply_settings(current: dict, patch: dict) -> dict:
         if "appearance" in s:
             disp["appearance"] = _choice(s["appearance"], "Appearance", APPEARANCE)
         if "bgColor" in s:
-            disp["bgColor"] = _colour(s["bgColor"], "Background colour")
+            disp["bgColor"] = _color(s["bgColor"], "Background color")
         if "bgGradient" in s:
             g = s["bgGradient"] if isinstance(s["bgGradient"], dict) else {}
-            disp["bgGradient"] = {"a": _colour(g.get("a"), "Gradient start colour"), "b": _colour(g.get("b"), "Gradient end colour"),
+            disp["bgGradient"] = {"a": _color(g.get("a"), "Gradient start color"), "b": _color(g.get("b"), "Gradient end color"),
                                   "angle": _int(g.get("angle", 160), "Gradient angle", 0, 359)}
         if "bgPhoto" in s:
             name = _str(s["bgPhoto"], "Background photo", 100)
@@ -1693,7 +1693,7 @@ VIRTUAL = re.compile(r"(https?://|zoom\.us|meet\.google|teams\.microsoft|webex)"
 # App
 # --------------------------------------------------------------------------
 
-# Colours chosen to be easy to tell apart, and bright enough to read as text on the dark screen
+# Colors chosen to be easy to tell apart, and bright enough to read as text on the dark screen
 PALETTE = ["#FF5A5F", "#FF9F1C", "#FFE14D", "#4CD964", "#22D3EE", "#5B8CFF", "#B07CFF", "#FF6FD8", "#C7CDD6", "#B5E853"]
 
 
@@ -1871,7 +1871,7 @@ class App:
 
     def refresh_calendar_list(self) -> dict:
         """Ask Google for every calendar in the account and merge it into settings:
-        known calendars keep their name, colour and on/off; new ones arrive switched on."""
+        known calendars keep their name, color and on/off; new ones arrive switched on."""
         found = discover_calendars(self.config["calendar"]["account"])
         c = copy.deepcopy(self.config)
         old = {cal.get("href"): cal for cal in c["calendar"]["calendars"] if cal.get("href")}

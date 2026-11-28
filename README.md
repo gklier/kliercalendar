@@ -42,13 +42,13 @@ It started as a replacement for a hosted dashboard service, so it keeps that ser
 ## Features
 
 **On the TV**
-- 📅 **The next one to four weeks** of every calendar in a Google account, each in its own colour. An event copied to several calendars (a chore on everyone's list) shows **once**, striped in each calendar's colour.
+- 📅 **The next one to four weeks** of every calendar in a Google account, each in its own color. An event copied to several calendars (a chore on everyone's list) shows **once**, striped in each calendar's color.
 - 🚗 **When to leave.** The next event with an address shows the drive time, current traffic and a "Leave by" time. Later events get their own on the right.
 - 🏠 **Drive times** to four places that matter, always on screen, inside a **monthly Google Maps budget** (900 reads by default, spread evenly through the month so a busy morning can't use the rest of it).
 - 🌦 **Weather** from a Tempest station, with the next four days, and a **sky** that follows the real weather and the time of day.
 - 📈 **A stock bar** that never stops sliding: prices in green and red with the percent change, for the tickers you choose. Stocks, ETFs, mutual funds, indexes and crypto, from Yahoo Finance, with no account or key.
 - 🔒 **Smart home** (Home Assistant): lock, door, garage, alarm and who's-home tiles with an "All secure" summary and warnings when something has been left open, lights, thermostats and sensors if you want them, a camera tile, a four-camera wall, and a pop-up that covers the screen when a camera sees motion.
-- 🖼 **Backgrounds**: the weather sky, family photos, one photo, ten gradients, or a flat colour. Light, dark or automatic by sunrise and sunset.
+- 🖼 **Backgrounds**: the weather sky, family photos, one photo, ten gradients, or a flat color. Light, dark or automatic by sunrise and sunset.
 - 🧩 **A free layout**: drag the clock, resize the calendar, hide what you don't need.
 - 🌙 **Sleep schedules** by day of the week: the screen (and the TV, over HDMI-CEC) switches off and on by itself, with a one-click "sleep now" or "keep awake".
 
@@ -145,7 +145,7 @@ The installer sets up a full-screen Chromium inside [cage](https://github.com/ca
 | Page | For |
 |---|---|
 | **On the TV** | Switch between the family dashboard and the fallback screen, reload the TV |
-| **Calendars** | Rename, recolour and switch calendars on or off |
+| **Calendars** | Rename, recolor and switch calendars on or off |
 | **Stocks** | Look companies up by name and build the bar |
 | **Smart home** | Choose the lock, door and alarm tiles and the cameras; pop-up settings |
 | **Look** | Background, light or dark, clock style, overnight dimming |
