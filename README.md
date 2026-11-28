@@ -170,6 +170,21 @@ The installer sets up a full-screen Chromium inside [cage](https://github.com/ca
 
 The server's data folder is the only thing that can't be recreated. The **Backup** page downloads it as one file, and shows how to automate that. The TV is rebuilt in about ten minutes from a fresh card with the command above, or restored from an image made with [`tools/backup-sd-card.sh`](tools/backup-sd-card.sh).
 
+## Built-in assistant (optional)
+
+**Settings → Assistant** (Expert) is a chat with Claude about the dashboard's own code. It keeps one conversation and one memory file on the server, so every device sees the same history and context. It only proposes: it edits a copy of the code and runs the tests, you look at the change, and **Apply** runs the tests again, commits, and builds a new image. Nothing reaches the TV until you update the stack.
+
+It runs in its own container with no Docker access. A small helper on the host builds the image from the exact commit you approved.
+
+1. On the Docker host, from the project folder:
+   ```bash
+   docker build -t family-dashboard-assistant:latest -f assistant/Dockerfile .
+   sudo DATA_DIR=/path/to/dashboard-data ASSISTANT_DIR=/path/to/assistant-home ./assistant/host/install-host.sh
+   ```
+2. Add the service in [`assistant/compose.snippet.yaml`](assistant/compose.snippet.yaml) to the stack, with your folder, and redeploy.
+3. Sign in once with your Claude account: `docker exec -it family-dashboard-assistant claude`, then `/login`.
+4. Optional: put notes about your setup in `ASSISTANT_DIR/.claude/CLAUDE.md`. That is the assistant's memory; it stays on the server.
+
 ## Power cuts and internet outages
 
 Built to ride them out without anyone touching it.

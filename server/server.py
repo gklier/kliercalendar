@@ -1679,6 +1679,9 @@ class HomeAssistant:
             return blob, ctype
 
 
+# The assistant container, on the same Docker network as the dashboard
+ASSISTANT_URL = os.environ.get("ASSISTANT_URL", "http://family-dashboard-assistant:8090")
+
 # A camera picture is shared this long (seconds) between screens asking at once. Short enough for a few
 # frames a second, long enough that two TVs don't double the load on the camera.
 SNAPSHOT_SHARE = 0.25
@@ -1904,6 +1907,51 @@ class App:
         return p if p.is_file() else None
 
     # --- the TV screen
+
+    # ---- the built-in assistant (its own container; see assistant/service.py)
+
+    @property
+    def assistant_dir(self) -> Path:
+        return self.store.path.parent
+
+    def assistant_call(self, method: str, path: str, body: dict | None = None, timeout: float = 15) -> tuple[int, dict]:
+        """Ask the assistant container. It only answers with the key the host set up for the two of them."""
+        try:
+            key = (self.assistant_dir / "assistant.key").read_text().strip()
+        except OSError:
+            return 503, {"error": "The assistant isn't set up on this server yet.", "setup": False}
+        req = urllib.request.Request(ASSISTANT_URL.rstrip("/") + path, method=method,
+                                     data=json.dumps(body or {}).encode() if method == "POST" else None,
+                                     headers={"X-Assistant-Key": key, "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            try:
+                return e.code, json.loads(e.read() or b"{}")
+            except ValueError:
+                return e.code, {"error": f"The assistant answered {e.code}."}
+        except (OSError, ValueError, http.client.HTTPException):
+            return 503, {"error": "The assistant isn't running. Check its container in Portainer.", "setup": True}
+
+    def assistant_state(self) -> tuple[int, dict]:
+        """The shared conversation and pending changes. When an Apply has been tested and committed, hand the
+        commit to the host's build helper (the assistant itself can't start a build)."""
+        status, st = self.assistant_call("GET", "/state")
+        builds = self.assistant_dir / "assistant-build"
+        if status == 200:
+            ap = st.get("apply") or {}
+            sha = str(ap.get("hash") or "")
+            if ap.get("status") == "committed" and re.fullmatch(r"[0-9a-f]{40}", sha):
+                builds.mkdir(exist_ok=True)
+                (builds / "request").write_text(sha + "\n")
+                self.assistant_call("POST", "/applied", {"hash": sha})
+                st["apply"]["status"] = "building"
+            try:
+                st["build"] = json.loads((builds / "status.json").read_text())
+            except (OSError, ValueError):
+                st["build"] = None
+        return status, st
 
     def screen_url(self) -> str:
         """This dashboard's own page. On the Pi that's a full localhost link; off-site
@@ -2311,6 +2359,9 @@ def make_handler(app: App):
                     return self._json(200, {"entities": app.ha.entities()})
                 except UpstreamError as e:
                     return self._json(502, {"error": str(e)})
+            if name in ("assistant/state", "assistant/diff", "assistant/patch"):
+                code, obj = app.assistant_state() if name == "assistant/state" else app.assistant_call("GET", "/" + name.split("/")[1])
+                return self._json(code, obj)
             if name == "stocks/search":
                 try:
                     return self._json(200, {"results": app.stock_search((q or {}).get("q", [""])[0])})
@@ -2370,6 +2421,9 @@ def make_handler(app: App):
                 # Shown once; only its hash is kept
                 return self._json(200, {"key": app.new_tv_key(data.get("name") or "TV"), "name": " ".join(str(data.get("name") or "TV").split())[:40],
                                         "settings": public_settings(app.config)})
+            if name.startswith("assistant/") and name.split("/", 1)[1] in ("ask", "cancel", "discard", "apply", "new", "sync"):
+                code, obj = app.assistant_call("POST", "/" + name.split("/", 1)[1], data)
+                return self._json(code, obj)
             if name == "tv/layout":
                 app.set_tv_layout(str(data.get("id", "")), data.get("layout"))
                 return self._json(200, {"settings": public_settings(app.config)})

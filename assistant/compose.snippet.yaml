@@ -1,0 +1,11 @@
+# Add under "services:" in the dashboard's stack (same stack, so the dashboard can reach it by name).
+# Nothing is published to the network: only the dashboard talks to it.
+  assistant:
+    image: family-dashboard-assistant:latest
+    container_name: family-dashboard-assistant
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${ASSISTANT_DIR:-./assistant-home}:/home/node    # sign-in, memory, conversation, code copy
+    mem_limit: 1536m

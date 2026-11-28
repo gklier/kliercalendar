@@ -701,6 +701,57 @@ class DashboardTest(unittest.TestCase):
         finally:
             self.app.save(before)
 
+    def test_assistant_proxy_and_build_handoff(self):
+        seen = {"key": None, "applied": None}
+        sha = "a" * 40
+
+        class FakeAssistant(BaseHTTPRequestHandler):
+            def log_message(self, *a): pass
+            def _send(self, obj, code=200):
+                body = json.dumps(obj).encode()
+                self.send_response(code)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def do_GET(self):
+                seen["key"] = self.headers.get("X-Assistant-Key")
+                self._send({"signedIn": True, "busy": False, "messages": [], "changes": {"files": []},
+                            "apply": {"status": "committed", "hash": sha}})
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                if self.path == "/applied":
+                    seen["applied"] = body.get("hash")
+                self._send({"ok": True, "got": body})
+
+        fake = ThreadingHTTPServer(("127.0.0.1", 0), FakeAssistant)
+        threading.Thread(target=fake.serve_forever, daemon=True).start()
+        old_url = server.ASSISTANT_URL
+        keyfile = self.app.assistant_dir / "assistant.key"
+        try:
+            anon = Client(self.base)
+            self.assertEqual(anon.call("/admin/api/assistant/state")[0], 401)          # settings sign-in first
+            c = self.signed_in()
+            s, r = c.call("/admin/api/assistant/state")
+            self.assertEqual((s, r.get("setup")), (503, False))                         # no key: not set up
+            keyfile.write_text("secret-key\n")
+            server.ASSISTANT_URL = "http://127.0.0.1:1"
+            self.assertEqual(c.call("/admin/api/assistant/state")[0], 503)              # set up, but not running
+            server.ASSISTANT_URL = f"http://127.0.0.1:{fake.server_port}"
+            s, r = c.call("/admin/api/assistant/state")
+            self.assertEqual(s, 200)
+            self.assertEqual(seen["key"], "secret-key")
+            self.assertEqual(r["apply"]["status"], "building")
+            self.assertEqual((self.app.assistant_dir / "assistant-build/request").read_text().strip(), sha)
+            self.assertEqual(seen["applied"], sha)
+            s, r = c.call("/admin/api/assistant/ask", {"text": "hello"})
+            self.assertEqual((s, r["got"]["text"]), (200, "hello"))
+            self.assertEqual(c.call("/admin/api/assistant/rm-rf", {})[0], 404)          # only the known actions pass
+        finally:
+            server.ASSISTANT_URL = old_url
+            keyfile.unlink(missing_ok=True)
+            fake.shutdown()
+
     def test_ha_snapshot_shared_between_screens(self):
         c = self.signed_in()
         before = server.copy.deepcopy(self.app.config)

@@ -142,7 +142,7 @@
   const PAGES = { tv: pageTV, calendars: pageCalendars, drive: pageDrive, weather: pageWeather, stocks: pageStocks, account: pageAccount, ...FD.pages };
 
   // Simple settings show what the family needs day to day. "Expert settings" adds the rest.
-  const EXPERT_PAGES = new Set(["layout", "drive", "weather", "backup", "about"]);
+  const EXPERT_PAGES = new Set(["layout", "drive", "weather", "backup", "about", "assistant"]);
   const isExpert = () => { try { return localStorage.getItem("fd_expert") === "1"; } catch (_) { return false; } };
   function setExpert(on) {
     try { localStorage.setItem("fd_expert", on ? "1" : "0"); } catch (_) { /* private window: just this visit */ }
