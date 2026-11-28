@@ -409,6 +409,11 @@
             <option value="sunday" ${settings.display.calStart === "sunday" ? "selected" : ""}>Sunday, as a week (days already gone are dimmed)</option>
           </select></div></div>
 
+        <h2>Colours</h2>
+        <div class="group"><div class="item"><span class="label">Tell people apart</span>
+          <div class="inline"><button type="button" class="secondary" id="cal-distinct">Use colours that are easy to tell apart</button></div>
+          <span class="sub">Gives each person a clearly different colour. Calendars that share a colour now (one person's calendars) keep sharing one. Nothing changes until you save.</span></div></div>
+
         <h2>From the Google account</h2>
         <div class="group" id="gcals">${google.length ? google.map((c) => calRow(c, st[c.id])).join("") : `<div class="item"><span class="label">None yet</span><span class="sub" style="grid-column:2">Connect the account above to list its calendars.</span></div>`}</div>
 
@@ -441,6 +446,35 @@
       } finally {
         btn.disabled = false;
       }
+    };
+
+    // Recolour with a set of clearly different colours, keeping each person's calendars together and each
+    // person close to the colour they had (red stays red, green stays green) where the set allows
+    $("#cal-distinct").onclick = () => {
+      const SET = ["#FF5A5F", "#FF9F1C", "#FFE14D", "#4CD964", "#22D3EE", "#5B8CFF", "#B07CFF", "#FF6FD8", "#C7CDD6", "#B5E853"];
+      const hue = (hex) => {
+        const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+        if (!d) return { h: 0, s: 0 };
+        const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+        return { h: (h * 60 + 360) % 360, s: d / (1 - Math.abs(mx + mn - 1) || 1) };
+      };
+      const dist = (a, b) => {
+        const x = hue(a), y = hue(b);
+        if (x.s < 0.15 || y.s < 0.15) return (x.s < 0.15 && y.s < 0.15 ? 0 : 200) + Math.abs(x.s - y.s) * 50;
+        const dh = Math.abs(x.h - y.h);
+        return Math.min(dh, 360 - dh);
+      };
+      const inputs = $$(".cal input[type=color]", page);
+      const old = [...new Set(inputs.map((i) => i.value.toUpperCase()))];
+      const choices = old.length <= 8 ? SET.slice(0, 8) : SET;     // eight hues spread round the wheel; the last two only when needed
+      const pairs = [];
+      old.forEach((o) => choices.forEach((n) => pairs.push([dist(o, n), o, n])));
+      pairs.sort((a, b) => a[0] - b[0]);
+      const map = {}, used = new Set();
+      for (const [, o, n] of pairs) if (!map[o] && !used.has(n)) { map[o] = n; used.add(n); }
+      inputs.forEach((i) => { const n = map[i.value.toUpperCase()]; if (n) i.value = n; });
+      toast(old.length > SET.length ? "More colours than the set has: some people share. Save to keep these." : "New colours picked. Save to put them on the TV.");
     };
 
     const list = $("#lcals");

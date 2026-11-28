@@ -69,11 +69,12 @@
     const stops = cs.map((c, i) => `${c} ${(i * step).toFixed(1)}% ${((i + 1) * step).toFixed(1)}%`).join(", ");
     return `--c:${cs[0]};--paint:linear-gradient(${dir || "180deg"}, ${stops})`;
   }
-  // Text in the person's colour (several people: the colours run across the letters)
+  // Text in the person's colour: returns class and style attributes. Several people: their colours run across
+  // the letters. On a light background the colour is darkened so it stays readable (styles.css, .tint).
   function tint(ev) {
     const cs = (ev.colors && ev.colors.length ? ev.colors : [ev.color || "#0A84FF"]).slice(0, 4).map(esc);
-    if (cs.length === 1) return `color:${cs[0]}`;
-    return `color:${cs[0]};background:linear-gradient(90deg, ${cs.join(", ")});-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent`;
+    if (cs.length === 1) return `class="tint" style="--t:${cs[0]}"`;
+    return `class="tint multi" style="--t:${cs[0]};--tg:linear-gradient(90deg, ${cs.join(", ")})"`;
   }
   const who = (ev) => (ev.calendars && ev.calendars.length ? ev.calendars : [ev.calendar]).join(", ");
 
@@ -369,8 +370,8 @@
     if (ev.allDay) return `<div class="ev allday${light}" style="${paint(ev, "90deg")}">${esc(ev.title)}</div>`;
     const startsHere = sameDay(ev.s, day);
     const done = ev.e < now ? " done" : "";
-    // Outlined in its person's colour (all-day events are the filled ones), several people side by side
-    return `<div class="ev outlined${done}" style="${paint(ev, "90deg")}"><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span class="ti">${esc(ev.title)}</span></span></div>`;
+    // The title in its person's colour; all-day events are the filled ones, so the two read apart
+    return `<div class="ev plain${done}"><span class="txt"><span class="tm">${startsHere ? fmtTime(ev.s, true) : "cont."}</span><span ${tint(ev)}><span class="ti">${esc(ev.title)}</span></span></span></div>`;
   }
 
   // Remove events from the bottom until the box fits, then say how many are hidden
@@ -480,7 +481,7 @@
       const started = featured.s <= now;
       next = `<div class="next" style="${paint(featured)}">
         <div class="next-when"><span class="next-time">${fmtTime(featured.s)}</span><span class="next-in">${started ? `now, until ${fmtTime(featured.e)}` : countdown(featured.s - now)}</span></div>
-        <div class="next-title" style="${tint(featured)}">${esc(featured.title)}</div>
+        <div class="next-title"><span ${tint(featured)}>${esc(featured.title)}</span></div>
         <div class="next-who">${esc(who(featured))}</div>
         ${featured.location ? `<div class="next-where">${esc(featured.location)}</div>` : ""}
         ${started ? "" : leaveHTML(featured, now)}
@@ -493,7 +494,7 @@
       return `<div class="row${cls}" style="${paint(ev)}">
         <div class="t">${ev.s <= now && ev.e > now ? "Now" : sameDay(ev.s, day) ? fmtTime(ev.s) : "cont."}</div>
         <div class="bar"></div>
-        <div><div class="ti" style="${tint(ev)}">${esc(ev.title)}</div><div class="meta">${esc(who(ev))}</div></div>
+        <div><div class="ti"><span ${tint(ev)}>${esc(ev.title)}</span></div><div class="meta">${esc(who(ev))}</div></div>
         ${ev.s > now ? rowLeave(ev, now) : ""}
       </div>`;
     }).join("");

@@ -1693,7 +1693,8 @@ VIRTUAL = re.compile(r"(https?://|zoom\.us|meet\.google|teams\.microsoft|webex)"
 # App
 # --------------------------------------------------------------------------
 
-PALETTE = ["#0A84FF", "#FF375F", "#30D158", "#FF9F0A", "#BF5AF2", "#64D2FF", "#FFD60A", "#FF453A", "#5E5CE6", "#8E8E93"]
+# Colours chosen to be easy to tell apart, and bright enough to read as text on the dark screen
+PALETTE = ["#FF5A5F", "#FF9F1C", "#FFE14D", "#4CD964", "#22D3EE", "#5B8CFF", "#B07CFF", "#FF6FD8", "#C7CDD6", "#B5E853"]
 
 
 def sleep_status(sched: dict, now: dt.datetime, override: dict | None = None) -> dict:
